@@ -30,7 +30,7 @@ export function useMediaManagement({ defaultDuration, onMediaAdd, onMediaUpdate 
       }
 
       const el = isAudio ? document.createElement("audio") : document.createElement("video")
-      el.crossOrigin = "anonymous"
+    
 
       el.onloadedmetadata = () => {
         const updates: Partial<MediaItem> = {
