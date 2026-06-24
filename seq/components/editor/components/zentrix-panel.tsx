@@ -71,6 +71,7 @@ export interface ZentrixChapterWithTiming {
 export interface ZentrixPanelProps {
   onClose: () => void
   onLoadChapter: (result: ZentrixChapterWithTiming) => void
+  onClearProject: () => void
 }
 
 /* ── Login Form ── */
@@ -290,10 +291,12 @@ function LoadedInfo({
   data,
   hasTiming,
   onLoadAnother,
+  onClear,
 }: {
   data: ZentrixEditorData
   hasTiming: boolean
   onLoadAnother: () => void
+  onClear: () => void
 }) {
   const videoCount = data.scenes.filter((s) => s.video_url).length
   const imageCount = data.scenes.filter((s) => s.image_url && !s.video_url).length
@@ -332,12 +335,18 @@ function LoadedInfo({
       >
         Cargar otro capítulo
       </button>
+      <button
+        onClick={onClear}
+        className="w-full py-2 text-xs text-red-400 hover:text-red-300 border border-red-900 hover:border-red-700 rounded-lg transition-colors"
+      >
+        🗑 Limpiar proyecto
+      </button>
     </div>
   )
 }
 
 /* ── Main Panel ── */
-export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter }: ZentrixPanelProps) {
+export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter, onClearProject }: ZentrixPanelProps) {
   const [token, setToken] = useState<string | null>(() => {
     if (typeof window !== "undefined") return localStorage.getItem(TOKEN_KEY)
     return null
@@ -391,7 +400,7 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter 
         {!token ? (
           <LoginForm onLogin={handleLogin} error={loginError} />
         ) : loadedData ? (
-          <LoadedInfo data={loadedData} hasTiming={hasTiming} onLoadAnother={() => setLoadedData(null)} />
+          <LoadedInfo data={loadedData} hasTiming={hasTiming} onLoadAnother={() => setLoadedData(null)} onClear={() => { setLoadedData(null); onClearProject(); }} />
         ) : (
           <ChapterSelector token={token} onLoad={handleLoad} onLogout={handleLogout} />
         )}
