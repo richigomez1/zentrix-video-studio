@@ -1487,6 +1487,10 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                         <PanelErrorBoundary fallbackTitle="Zentrix Error">
                           <ZentrixPanel
                             onClose={() => setIsPanelOpen(false)}
+                            onClearProject={() => {
+                              timeline.setMedia([])
+                              timeline.setTimelineClips([])
+                            }}
                             onLoadChapter={(result: ZentrixChapterWithTiming) => {
                               const { data, timing } = result
                               const mediaItems: MediaItem[] = []
