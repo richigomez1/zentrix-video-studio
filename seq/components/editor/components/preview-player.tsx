@@ -334,9 +334,23 @@ export const PreviewPlayer = memo(function PreviewPlayer({
                 />
               )}
 
+              {/* Image display for image clips */}
+              {!isPreviewPlayback && activeClip && mediaMap[activeClip.mediaId]?.type === "image" && (
+                <img
+                  src={mediaMap[activeClip.mediaId]?.url}
+                  alt={mediaMap[activeClip.mediaId]?.prompt || ""}
+                  className="absolute inset-0 w-full h-full object-contain bg-black z-10"
+                  style={{
+                    filter: cssFilter,
+                    opacity: clipOpacity / 100,
+                  }}
+                  onClick={() => !isExporting && !isRendering && !isPreviewPlayback && onTogglePlay()}
+                />
+              )}
+
               <video
                 ref={videoRefA as React.RefObject<HTMLVideoElement>}
-                className={`absolute inset-0 w-full h-full object-contain bg-black transition-transform ${isPreviewPlayback ? "hidden" : ""}`}
+                className={`absolute inset-0 w-full h-full object-contain bg-black transition-transform ${isPreviewPlayback || (activeClip && mediaMap[activeClip.mediaId]?.type === "image") ? "hidden" : ""}`}
                 onClick={() => !isExporting && !isRendering && !isPreviewPlayback && onTogglePlay()}
                 style={{
                   filter: cssFilter,
@@ -345,7 +359,7 @@ export const PreviewPlayer = memo(function PreviewPlayer({
               />
               <video
                 ref={videoRefB as React.RefObject<HTMLVideoElement>}
-                className={`absolute inset-0 w-full h-full object-contain bg-black transition-transform opacity-0 ${isPreviewPlayback ? "hidden" : ""}`}
+                className={`absolute inset-0 w-full h-full object-contain bg-black transition-transform opacity-0 ${isPreviewPlayback || (activeClip && mediaMap[activeClip.mediaId]?.type === "image") ? "hidden" : ""}`}
                 onClick={() => !isExporting && !isRendering && !isPreviewPlayback && onTogglePlay()}
                 style={{
                   filter: cssFilter,
