@@ -19,8 +19,9 @@ import {
 } from "@/seq/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/seq/components/ui/tooltip"
 import { UserMenu } from "./user-menu"
+import { Layers } from "lucide-react"
 
-export type SidebarView = "library" | "create" | "settings" | "transitions" | "inspector" | "storyboard"
+export type SidebarView = "library" | "create" | "settings" | "transitions" | "inspector" | "storyboard" | "zentrix"
 
 export interface EditorSidebarProps {
   activeView: SidebarView
@@ -30,6 +31,17 @@ export interface EditorSidebarProps {
   onBack: () => void
 }
 
+const ZentrixIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+    <polyline points="7.5 4.21 12 6.81 16.5 4.21" />
+    <polyline points="7.5 19.79 7.5 14.6 3 12" />
+    <polyline points="21 12 16.5 14.6 16.5 19.79" />
+    <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+    <line x1="12" y1="22.08" x2="12" y2="12" />
+  </svg>
+)
+
 const SIDEBAR_ITEMS: {
   id: SidebarView
   icon: React.FC<{ className?: string }>
@@ -37,12 +49,13 @@ const SIDEBAR_ITEMS: {
   miniLabel: string
   shortcut?: string
 }[] = [
-  { id: "create", icon: PlusIcon, label: "Create", miniLabel: "Create", shortcut: "1" },
-  { id: "library", icon: GridIcon, label: "Library", miniLabel: "Library", shortcut: "2" },
-  { id: "storyboard", icon: StoryboardIcon, label: "Storyboard", miniLabel: "Panels", shortcut: "3" },
-  { id: "transitions", icon: TransitionIcon, label: "Transitions", miniLabel: "Effects", shortcut: "4" },
-  { id: "inspector", icon: InfoIcon, label: "Inspector", miniLabel: "Details", shortcut: "5" },
-  { id: "settings", icon: SettingsIcon, label: "Settings", miniLabel: "Config", shortcut: "6" },
+  { id: "zentrix", icon: ZentrixIcon, label: "Zentrix", miniLabel: "Zentrix", shortcut: "Z" },
+  { id: "create", icon: PlusIcon, label: "Crear", miniLabel: "Crear", shortcut: "1" },
+  { id: "library", icon: GridIcon, label: "Biblioteca", miniLabel: "Biblioteca", shortcut: "2" },
+  { id: "storyboard", icon: StoryboardIcon, label: "Storyboard", miniLabel: "Paneles", shortcut: "3" },
+  { id: "transitions", icon: TransitionIcon, label: "Transiciones", miniLabel: "Efectos", shortcut: "4" },
+  { id: "inspector", icon: InfoIcon, label: "Inspector", miniLabel: "Detalles", shortcut: "5" },
+  { id: "settings", icon: SettingsIcon, label: "Configuración", miniLabel: "Config", shortcut: "6" },
 ]
 
 function EditorSidebarInner({ activeView, isPanelOpen, onViewChange, onTogglePanel, onBack }: EditorSidebarProps) {
@@ -102,17 +115,21 @@ function EditorSidebarInner({ activeView, isPanelOpen, onViewChange, onTogglePan
                             className={cn(
                               "p-1.5 rounded-md group-hover/sidebar-item:bg-[var(--hover-overlay)] transition-colors",
                               isActive && "bg-[var(--hover-overlay)]",
+                              id === "zentrix" && isActive && "bg-indigo-600/20",
                             )}
                           >
                             <Icon
                               className={cn(
                                 "h-4 w-4 shrink-0",
                                 isActive ? "text-primary" : "text-[var(--text-tertiary)] group-hover/sidebar-item:text-primary/70",
+                                id === "zentrix" && isActive && "text-indigo-400",
                               )}
                             />
                           </div>
                           {isCollapsed && (
-                            <span className={cn(isActive ? "text-primary" : "text-[var(--text-tertiary)]")}>
+                            <span className={cn(isActive ? "text-primary" : "text-[var(--text-tertiary)]",
+                              id === "zentrix" && isActive && "text-indigo-400",
+                            )}>
                               {miniLabel}
                             </span>
                           )}
@@ -144,11 +161,9 @@ function EditorSidebarInner({ activeView, isPanelOpen, onViewChange, onTogglePan
       </SidebarContent>
 
       <SidebarFooter className="mt-auto border-t border-[var(--border-default)] p-3">
-        {!isCollapsed && (
-          <div className="text-xs text-[var(--text-muted)]">
-            <span className="font-medium text-white">∞</span> Credits
-          </div>
-        )}
+        <div className="text-center">
+          <span className="text-[9px] font-bold text-[var(--text-tertiary)] tracking-wider">ZENTRIX</span>
+        </div>
       </SidebarFooter>
     </Sidebar>
   )
