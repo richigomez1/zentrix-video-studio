@@ -353,6 +353,7 @@ export const Timeline = memo(function Timeline({
         onTogglePreviewPlayback={onTogglePreviewPlayback}
         onAddMarker={onAddMarker}
         onZoomToFit={onZoomToFit}
+        onDeleteClip={selectedClipIds.length > 0 ? () => onDeleteClip(selectedClipIds) : undefined}
       />
 
       <div
