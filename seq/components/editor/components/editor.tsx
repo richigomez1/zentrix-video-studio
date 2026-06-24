@@ -23,7 +23,7 @@ import { PanelErrorBoundary } from "./panel-error-boundary"
 import { SidebarPanelWrapper } from "./sidebar-panel-wrapper"
 
 import { ProjectLibrary } from "./project-library"
-import { CreatePanel } from "./create-panel"
+import { ProductionPanel } from "./production-panel"
 import { SettingsPanel } from "./settings-panel"
 import { TransitionsPanel } from "./transitions-panel"
 import { InspectorPanel } from "./inspector-panel"
@@ -290,6 +290,7 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
 
   // UI State - Use constants for default values
   const [activeView, setActiveView] = useState<SidebarView>("library")
+  const [loadedChapterId, setLoadedChapterId] = useState<string | null>(null)
   const [isPanelOpen, setIsPanelOpen] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
   const [apiKeyReady, setApiKeyReady] = useState(false) // Was not in updates, keeping it
@@ -1401,12 +1402,16 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                         </PanelErrorBoundary>
                       )}
                       {activeView === "create" && (
-                        <PanelErrorBoundary fallbackTitle="Create Panel Error">
-                          <CreatePanel
-                            onGenerate={mediaGeneration.generate}
-                            isGenerating={mediaGeneration.isGenerating}
+                        <PanelErrorBoundary fallbackTitle="Production Panel Error">
+                          <ProductionPanel
                             onClose={() => setIsPanelOpen(false)}
-                            generatedItem={mediaGeneration.generatedItem}
+                            media={timeline.media}
+                            chapterId={loadedChapterId}
+                            onUpdateMedia={(id, updates) => {
+                              timeline.setMedia((prev) =>
+                                prev.map((m) => (m.id === id ? { ...m, ...updates } : m))
+                              )
+                            }}
                           />
                         </PanelErrorBoundary>
                       )}
@@ -1492,7 +1497,8 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                               timeline.setTimelineClips([])
                             }}
                             onLoadChapter={(result: ZentrixChapterWithTiming) => {
-                              const { data, timing } = result
+                              const { data, timing, chapterId: chapId } = result
+                              setLoadedChapterId(chapId)
                               const mediaItems: MediaItem[] = []
                               const clips: TimelineClip[] = []
 
