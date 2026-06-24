@@ -1488,27 +1488,25 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                           <ZentrixPanel
                             onClose={() => setIsPanelOpen(false)}
                             onLoadChapter={(data: ZentrixEditorData) => {
-                              // Clear existing timeline
-                              timeline.setTimelineClips([])
-                              
                               const mediaItems: MediaItem[] = []
                               const clips: TimelineClip[] = []
+                              let currentTime = 0
 
-                              // Create media items and clips for each scene
+                              // Create media items and clips sequentially
                               for (const scene of data.scenes) {
                                 const url = scene.video_url || scene.image_url
                                 if (!url) continue
 
                                 const mediaId = `zentrix-s${scene.index}`
-                                const startTime = scene.start_time || scene.index * 10
-                                const endTime = scene.end_time || startTime + 10
-                                const duration = endTime - startTime
+                                const sceneDuration = (scene.end_time && scene.start_time)
+                                  ? (scene.end_time - scene.start_time)
+                                  : 10
 
                                 mediaItems.push({
                                   id: mediaId,
                                   url,
                                   prompt: scene.image_prompt || scene.text_excerpt || `Escena ${scene.index + 1}`,
-                                  duration,
+                                  duration: sceneDuration,
                                   aspectRatio: "16:9",
                                   thumbnailUrl: scene.image_url || undefined,
                                   status: "ready",
@@ -1518,14 +1516,16 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
 
                                 clips.push({
                                   speed: 1,
-                                  id: `clip-z-${scene.index}`,
+                                  id: `clip-z-${scene.index}-${Date.now()}`,
                                   mediaId,
                                   trackId: "v1",
-                                  start: startTime,
-                                  duration,
+                                  start: currentTime,
+                                  duration: sceneDuration,
                                   offset: 0,
                                   volume: 1,
                                 })
+
+                                currentTime += sceneDuration
                               }
 
                               // Add audio
@@ -1542,7 +1542,7 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                                 })
                                 clips.push({
                                   speed: 1,
-                                  id: "clip-z-audio",
+                                  id: `clip-z-audio-${Date.now()}`,
                                   mediaId: audioId,
                                   trackId: "a1",
                                   start: 0,
@@ -1552,9 +1552,11 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                                 })
                               }
 
-                              // Load everything into timeline
+                              // Replace everything at once
                               timeline.setMedia(mediaItems)
-                              timeline.setTimelineClips(clips)
+                              setTimeout(() => {
+                                timeline.setTimelineClips(clips)
+                              }, 100)
                               setActiveView("library")
                             }}
                           />
