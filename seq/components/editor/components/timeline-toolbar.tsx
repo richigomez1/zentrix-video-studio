@@ -25,6 +25,7 @@ import {
   RedoIcon,
   FlagIcon,
   MaximizeIcon,
+  TrashIcon,
 } from "./icons"
 import { Button } from "@/seq/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider } from "@/seq/components/ui/tooltip"
@@ -65,6 +66,7 @@ interface TimelineToolbarProps {
   onTogglePreviewPlayback?: () => void
   onAddMarker?: () => void
   onZoomToFit?: () => void
+  onDeleteClip?: () => void
 }
 
 export const TimelineToolbar = memo(function TimelineToolbar({
@@ -103,6 +105,7 @@ export const TimelineToolbar = memo(function TimelineToolbar({
   onTogglePreviewPlayback,
   onAddMarker,
   onZoomToFit,
+  onDeleteClip,
 }: TimelineToolbarProps) {
   const frameDuration = 1 / frameRate
 
@@ -306,6 +309,18 @@ export const TimelineToolbar = memo(function TimelineToolbar({
               <SplitIcon className="w-3.5 h-3.5" />
               <span className="text-[10px] uppercase font-bold tracking-wider">Split</span>
             </div>
+
+            {/* Delete button - visible when clips selected */}
+            {selectedClipCount > 0 && onDeleteClip && (
+              <div
+                className="flex items-center gap-2 px-2 py-0.5 rounded border border-transparent hover:bg-red-500/20 text-red-400 hover:text-red-300 cursor-pointer transition-colors"
+                onClick={onDeleteClip}
+                title="Eliminar clips seleccionados (Delete)"
+              >
+                <TrashIcon className="w-3.5 h-3.5" />
+                <span className="text-[10px] uppercase font-bold tracking-wider">Eliminar</span>
+              </div>
+            )}
           </div>
 
           {/* Render Preview Controls */}
