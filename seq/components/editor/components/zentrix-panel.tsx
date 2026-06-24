@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect, useCallback, memo } from "react"
-import type { MediaItem } from "../types"
 import { PanelLeftClose } from "./icons"
 
 const BACKEND_URL =
@@ -36,7 +35,7 @@ interface ZentrixChapter {
   [key: string]: unknown
 }
 
-interface ZentrixScene {
+export interface ZentrixScene {
   index: number
   start_time: number
   end_time: number
@@ -47,7 +46,7 @@ interface ZentrixScene {
   video_model: string | null
 }
 
-interface EditorData {
+export interface ZentrixEditorData {
   project_name: string
   chapter_title: string
   chapter_number: number
@@ -57,9 +56,9 @@ interface EditorData {
   scenes: ZentrixScene[]
 }
 
-interface ZentrixPanelProps {
+export interface ZentrixPanelProps {
   onClose: () => void
-  onLoadMedia: (items: MediaItem[]) => void
+  onLoadChapter: (data: ZentrixEditorData) => void
 }
 
 /* ── Login Form ── */
@@ -115,7 +114,7 @@ function ChapterSelector({
   onLogout,
 }: {
   token: string
-  onLoad: (data: EditorData) => void
+  onLoad: (data: ZentrixEditorData) => void
   onLogout: () => void
 }) {
   const [projects, setProjects] = useState<ZentrixProject[]>([])
@@ -238,7 +237,7 @@ function LoadedInfo({
   data,
   onLoadAnother,
 }: {
-  data: EditorData
+  data: ZentrixEditorData
   onLoadAnother: () => void
 }) {
   const videoCount = data.scenes.filter((s) => s.video_url).length
@@ -276,13 +275,13 @@ function LoadedInfo({
 }
 
 /* ── Main Panel ── */
-export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadMedia }: ZentrixPanelProps) {
+export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter }: ZentrixPanelProps) {
   const [token, setToken] = useState<string | null>(() => {
     if (typeof window !== "undefined") return localStorage.getItem(TOKEN_KEY)
     return null
   })
   const [loginError, setLoginError] = useState("")
-  const [loadedData, setLoadedData] = useState<EditorData | null>(null)
+  const [loadedData, setLoadedData] = useState<ZentrixEditorData | null>(null)
 
   const handleLogin = useCallback(async (email: string, pass: string) => {
     setLoginError("")
@@ -305,45 +304,11 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadMedia }:
   }, [])
 
   const handleLoad = useCallback(
-    (data: EditorData) => {
+    (data: ZentrixEditorData) => {
       setLoadedData(data)
-
-      // Convert scenes to MediaItem[]
-      const mediaItems: MediaItem[] = []
-
-      for (const scene of data.scenes) {
-        const url = scene.video_url || scene.image_url
-        if (!url) continue
-
-        mediaItems.push({
-          id: `zentrix-s${scene.index}`,
-          url,
-          prompt: scene.image_prompt || scene.text_excerpt || `Escena ${scene.index + 1}`,
-          duration: (scene.end_time || 0) - (scene.start_time || 0) || 10,
-          aspectRatio: "16:9",
-          thumbnailUrl: scene.image_url || undefined,
-          status: "ready",
-          type: scene.video_url ? "video" : "image",
-          resolution: { width: 1280, height: 720 },
-        })
-      }
-
-      // Add audio as a separate media item
-      if (data.audio_url) {
-        mediaItems.push({
-          id: "zentrix-audio",
-          url: data.audio_url,
-          prompt: `Audio: ${data.chapter_title}`,
-          duration: data.audio_duration || 0,
-          aspectRatio: "16:9",
-          status: "ready",
-          type: "audio",
-        })
-      }
-
-      onLoadMedia(mediaItems)
+      onLoadChapter(data)
     },
-    [onLoadMedia],
+    [onLoadChapter],
   )
 
   return (
