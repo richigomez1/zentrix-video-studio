@@ -352,8 +352,8 @@ export const SettingsPanel = memo(function SettingsPanel({
 
         {/* Footer */}
         <div className="mt-auto pt-4 text-center border-t border-[var(--border-default)]">
-          <p className="text-[10px] text-neutral-600">Seq Video Editor v1.0.2</p>
-          <p className="text-[10px] text-neutral-700 mt-1">Built with Next.js & FFmpeg</p>
+          <p className="text-[10px] text-neutral-600">Zentrix Video Studio V1.0</p>
+          <p className="text-[10px] text-neutral-700 mt-1">Zentrix · Next.js & FFmpeg</p>
         </div>
       </PanelContent>
     </PanelContainer>
