@@ -34,7 +34,7 @@ async function extractAudioFromMedia(mediaUrl: string, numBars: number): Promise
 
     // Create an audio element (works for both audio and video)
     const mediaElement = document.createElement("audio")
-    mediaElement.crossOrigin = "anonymous"
+   
     mediaElement.preload = "metadata"
 
     let resolved = false
