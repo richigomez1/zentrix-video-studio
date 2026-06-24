@@ -66,6 +66,7 @@ export interface TimingEntry {
 export interface ZentrixChapterWithTiming {
   data: ZentrixEditorData
   timing: TimingEntry[] | null
+  chapterId: string
 }
 
 export interface ZentrixPanelProps {
@@ -203,7 +204,7 @@ function ChapterSelector({
         }
       }
 
-      onLoad({ data, timing })
+      onLoad({ data, timing, chapterId: selChapter })
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Error al cargar")
     } finally {
