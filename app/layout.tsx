@@ -20,50 +20,37 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "Seq - AI-Powered Storyboard to Video Sequence Editor",
+  title: "Zentrix Video Studio - Editor de Video con IA",
   description:
-    "Transform storyboards into cinematic video sequences. Seq uses AI to generate video clips from your panels and assembles them in a professional magnetic timeline editor.",
+    "Estudio de producción de video con IA. Genera imágenes, videos y edita en un timeline profesional para contenido de YouTube.",
   keywords: [
-    "seq",
-    "sequence editor",
-    "storyboard to video",
-    "AI video generation",
-    "magnetic timeline",
+    "zentrix",
     "video editor",
-    "Veo 3.1",
-    "fal.ai",
-    "video sequence",
-    "AI filmmaking",
+    "AI video generation",
+    "timeline editor",
+    "video production",
+    "youtube content",
   ],
-  authors: [{ name: "v0" }],
-  creator: "v0",
-  publisher: "v0",
-  generator: "v0.app",
+  authors: [{ name: "Zentrix" }],
+  creator: "Zentrix",
+  publisher: "Zentrix",
   openGraph: {
     type: "website",
-    locale: "en_US",
-    title: "Seq - AI-Powered Storyboard to Video Sequence Editor",
+    locale: "es_ES",
+    title: "Zentrix Video Studio - Editor de Video con IA",
     description:
-      "Transform storyboards into cinematic video sequences with AI video generation and a professional magnetic timeline editor.",
-    siteName: "Seq",
+      "Estudio de producción de video con IA. Genera imágenes, videos y edita en un timeline profesional.",
+    siteName: "Zentrix Video Studio",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Seq - AI-Powered Storyboard to Video Sequence Editor",
+    title: "Zentrix Video Studio - Editor de Video con IA",
     description:
-      "Transform storyboards into cinematic video sequences with AI video generation and a professional magnetic timeline editor.",
-    creator: "@vercel",
+      "Estudio de producción de video con IA. Genera imágenes, videos y edita en un timeline profesional.",
   },
   robots: {
-    index: true,
-    follow: true,
-    googleBot: {
-      index: true,
-      follow: true,
-      "max-video-preview": -1,
-      "max-image-preview": "large",
-      "max-snippet": -1,
-    },
+    index: false,
+    follow: false,
   },
 }
 
@@ -81,7 +68,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="es"
       className={`${inter.variable} ${jetbrainsMono.variable}`}
       suppressHydrationWarning
       style={{ backgroundColor: "#000000" }}
