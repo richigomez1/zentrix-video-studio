@@ -1490,17 +1490,26 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                             onLoadChapter={(data: ZentrixEditorData) => {
                               const mediaItems: MediaItem[] = []
                               const clips: TimelineClip[] = []
+
+                              // Calculate duration per scene based on audio
+                              const validScenes = data.scenes.filter((s) => s.video_url || s.image_url)
+                              const audioDuration = data.audio_duration || 60
+                              const durationPerScene = audioDuration / (validScenes.length || 1)
+
                               let currentTime = 0
 
-                              // Create media items and clips sequentially
-                              for (const scene of data.scenes) {
+                              for (const scene of validScenes) {
                                 const url = scene.video_url || scene.image_url
                                 if (!url) continue
 
                                 const mediaId = `zentrix-s${scene.index}`
-                                const sceneDuration = (scene.end_time && scene.start_time)
-                                  ? (scene.end_time - scene.start_time)
-                                  : 10
+                                const isVideo = !!scene.video_url
+                                
+                                // For videos: use actual video duration (capped to not exceed slot)
+                                // For images: use calculated duration from audio
+                                const sceneDuration = isVideo
+                                  ? Math.min(durationPerScene, (scene.end_time && scene.start_time) ? (scene.end_time - scene.start_time) : durationPerScene)
+                                  : durationPerScene
 
                                 mediaItems.push({
                                   id: mediaId,
@@ -1510,7 +1519,7 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                                   aspectRatio: "16:9",
                                   thumbnailUrl: scene.image_url || undefined,
                                   status: "ready",
-                                  type: scene.video_url ? "video" : "image",
+                                  type: isVideo ? "video" : "image",
                                   resolution: { width: 1280, height: 720 },
                                 })
 
@@ -1535,7 +1544,7 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                                   id: audioId,
                                   url: data.audio_url,
                                   prompt: `Audio: ${data.chapter_title}`,
-                                  duration: data.audio_duration || 0,
+                                  duration: audioDuration,
                                   aspectRatio: "16:9",
                                   status: "ready",
                                   type: "audio",
@@ -1546,13 +1555,13 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                                   mediaId: audioId,
                                   trackId: "a1",
                                   start: 0,
-                                  duration: data.audio_duration || 0,
+                                  duration: audioDuration,
                                   offset: 0,
                                   volume: 1,
                                 })
                               }
 
-                              // Replace everything at once
+                              // Replace everything
                               timeline.setMedia(mediaItems)
                               setTimeout(() => {
                                 timeline.setTimelineClips(clips)
@@ -1613,10 +1622,12 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                     onPlay={() => playback.setIsPlaying(true)}
                     onZoomReset={() => setPlayerZoom(1)}
                     activeClip={timeline.timelineClips.find(
-                      (c) =>
-                        c.trackId.startsWith("video") &&
-                        playback.currentTime >= c.start &&
-                        playback.currentTime < c.start + c.duration,
+                      (c) => {
+                        const track = timeline.tracks.find((t) => t.id === c.trackId)
+                        return track?.type === "video" &&
+                          playback.currentTime >= c.start &&
+                          playback.currentTime < c.start + c.duration
+                      }
                     )}
                     // Pass text clips to preview player for rendering text overlays
                     textClips={timeline.timelineClips.filter((c) => {
