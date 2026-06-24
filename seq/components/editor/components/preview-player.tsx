@@ -331,14 +331,12 @@ export const PreviewPlayer = memo(function PreviewPlayer({
                   src={renderedPreviewUrl}
                   className="absolute inset-0 w-full h-full object-contain bg-black z-10"
                   controls
-                  crossOrigin="anonymous"
                 />
               )}
 
               <video
                 ref={videoRefA as React.RefObject<HTMLVideoElement>}
                 className={`absolute inset-0 w-full h-full object-contain bg-black transition-transform ${isPreviewPlayback ? "hidden" : ""}`}
-                crossOrigin="anonymous"
                 onClick={() => !isExporting && !isRendering && !isPreviewPlayback && onTogglePlay()}
                 style={{
                   filter: cssFilter,
@@ -348,7 +346,6 @@ export const PreviewPlayer = memo(function PreviewPlayer({
               <video
                 ref={videoRefB as React.RefObject<HTMLVideoElement>}
                 className={`absolute inset-0 w-full h-full object-contain bg-black transition-transform opacity-0 ${isPreviewPlayback ? "hidden" : ""}`}
-                crossOrigin="anonymous"
                 onClick={() => !isExporting && !isRendering && !isPreviewPlayback && onTogglePlay()}
                 style={{
                   filter: cssFilter,
