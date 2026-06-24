@@ -105,17 +105,7 @@ export function usePlayback({
           sourceNodesRef.current.set(id, source)
         } catch (e) {}
       }
-    })
-    Object.entries(audioRefs.current).forEach(([trackId, el]) => {
-      if (el && !sourceNodesRef.current.has(trackId)) {
-        try {
-          const source = ctx.createMediaElementSource(el)
-          if (dest) source.connect(dest)
-          source.connect(ctx.destination)
-          sourceNodesRef.current.set(trackId, source)
-        } catch (e) {}
-      }
-    })
+ 
   }, [])
 
   useEffect(() => {
