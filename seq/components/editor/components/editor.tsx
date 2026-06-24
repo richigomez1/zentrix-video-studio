@@ -28,7 +28,7 @@ import { SettingsPanel } from "./settings-panel"
 import { TransitionsPanel } from "./transitions-panel"
 import { InspectorPanel } from "./inspector-panel"
 import { StoryboardPanel as StoryboardPanelComponent } from "./storyboard-panel"
-import { ZentrixPanel } from "./zentrix-panel"
+import { ZentrixPanel, type ZentrixEditorData } from "./zentrix-panel"
 import { ExportModal } from "./export-modal"
 import { ShortcutsModal } from "./shortcuts-modal"
 import { Timeline } from "./timeline"
@@ -1487,8 +1487,74 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                         <PanelErrorBoundary fallbackTitle="Zentrix Error">
                           <ZentrixPanel
                             onClose={() => setIsPanelOpen(false)}
-                            onLoadMedia={(items) => {
-                              timeline.setMedia((prev) => [...items, ...prev])
+                            onLoadChapter={(data: ZentrixEditorData) => {
+                              // Clear existing timeline
+                              timeline.setTimelineClips([])
+                              
+                              const mediaItems: MediaItem[] = []
+                              const clips: TimelineClip[] = []
+
+                              // Create media items and clips for each scene
+                              for (const scene of data.scenes) {
+                                const url = scene.video_url || scene.image_url
+                                if (!url) continue
+
+                                const mediaId = `zentrix-s${scene.index}`
+                                const startTime = scene.start_time || scene.index * 10
+                                const endTime = scene.end_time || startTime + 10
+                                const duration = endTime - startTime
+
+                                mediaItems.push({
+                                  id: mediaId,
+                                  url,
+                                  prompt: scene.image_prompt || scene.text_excerpt || `Escena ${scene.index + 1}`,
+                                  duration,
+                                  aspectRatio: "16:9",
+                                  thumbnailUrl: scene.image_url || undefined,
+                                  status: "ready",
+                                  type: scene.video_url ? "video" : "image",
+                                  resolution: { width: 1280, height: 720 },
+                                })
+
+                                clips.push({
+                                  speed: 1,
+                                  id: `clip-z-${scene.index}`,
+                                  mediaId,
+                                  trackId: "v1",
+                                  start: startTime,
+                                  duration,
+                                  offset: 0,
+                                  volume: 1,
+                                })
+                              }
+
+                              // Add audio
+                              if (data.audio_url) {
+                                const audioId = "zentrix-audio"
+                                mediaItems.push({
+                                  id: audioId,
+                                  url: data.audio_url,
+                                  prompt: `Audio: ${data.chapter_title}`,
+                                  duration: data.audio_duration || 0,
+                                  aspectRatio: "16:9",
+                                  status: "ready",
+                                  type: "audio",
+                                })
+                                clips.push({
+                                  speed: 1,
+                                  id: "clip-z-audio",
+                                  mediaId: audioId,
+                                  trackId: "a1",
+                                  start: 0,
+                                  duration: data.audio_duration || 0,
+                                  offset: 0,
+                                  volume: 1,
+                                })
+                              }
+
+                              // Load everything into timeline
+                              timeline.setMedia(mediaItems)
+                              timeline.setTimelineClips(clips)
                               setActiveView("library")
                             }}
                           />
