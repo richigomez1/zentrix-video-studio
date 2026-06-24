@@ -106,6 +106,7 @@ export function usePlayback({
         } catch (e) {}
       }
     })
+    // Audio elements play directly (no Web Audio API for CORS compatibility with R2)
   }, [])
 
   useEffect(() => {
