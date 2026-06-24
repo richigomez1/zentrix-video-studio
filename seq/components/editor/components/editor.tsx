@@ -290,9 +290,38 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
 
   // UI State - Use constants for default values
   const [activeView, setActiveView] = useState<SidebarView>("library")
-  const [loadedChapterId, setLoadedChapterId] = useState<string | null>(null)
-  const [loadedChapterData, setLoadedChapterData] = useState<ZentrixEditorData | null>(null)
+  const [loadedChapterId, setLoadedChapterId] = useState<string | null>(() => {
+    if (typeof window !== "undefined") return localStorage.getItem("zentrix_loaded_chapter_id")
+    return null
+  })
+  const [loadedChapterData, setLoadedChapterData] = useState<ZentrixEditorData | null>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("zentrix_loaded_chapter_data")
+        return saved ? JSON.parse(saved) : null
+      } catch { return null }
+    }
+    return null
+  })
   const [isProductionModalOpen, setIsProductionModalOpen] = useState(false)
+
+  // Persist chapter data to localStorage
+  useEffect(() => {
+    if (loadedChapterId) {
+      localStorage.setItem("zentrix_loaded_chapter_id", loadedChapterId)
+    } else {
+      localStorage.removeItem("zentrix_loaded_chapter_id")
+    }
+  }, [loadedChapterId])
+
+  useEffect(() => {
+    if (loadedChapterData) {
+      localStorage.setItem("zentrix_loaded_chapter_data", JSON.stringify(loadedChapterData))
+    } else {
+      localStorage.removeItem("zentrix_loaded_chapter_data")
+    }
+  }, [loadedChapterData])
+
   const [isPanelOpen, setIsPanelOpen] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
   const [apiKeyReady, setApiKeyReady] = useState(false) // Was not in updates, keeping it
@@ -1512,8 +1541,9 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                             onClearProject={() => {
                               timeline.setMedia([])
                               timeline.setTimelineClips([])
+                              setLoadedChapterId(null)
                               setLoadedChapterData(null)
-                            }}
+                            }}}
                             onLoadChapter={(result: ZentrixChapterWithTiming) => {
                               const { data, timing, chapterId: chapId } = result
                               setLoadedChapterId(chapId)
