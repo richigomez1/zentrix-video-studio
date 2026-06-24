@@ -22,7 +22,7 @@ interface ModelInfo {
 }
 
 const MODELS: ModelInfo[] = [
-  { id: "ken-burns", name: "Ken Burns", durations: [5, 8, 10, 12, 15], price720: 0, price1080: 0, emoji: "🎞", tier: "Gratis" },
+  { id: "ken-burns", name: "Ken Burns", durations: [4, 5, 6, 8, 10, 12, 15], price720: 0, price1080: 0, emoji: "🎞", tier: "Gratis" },
   { id: "pruna-video", name: "PrunaAI", durations: [5, 10], price720: 0.02, price1080: 0.04, emoji: "🎬", tier: "$" },
   { id: "seedance-1-pro-fast", name: "SD 1.0 Fast", durations: [4, 6, 8, 12], price720: 0.025, price1080: 0.06, emoji: "⚡", tier: "$" },
   { id: "seedance-1.5-pro", name: "SD 1.5 Pro", durations: [5, 8, 10, 12], price720: 0.052, price1080: 0.10, emoji: "🎥", tier: "$$" },
@@ -35,13 +35,29 @@ const MODELS: ModelInfo[] = [
 
 const MODEL_MAP = Object.fromEntries(MODELS.map((m) => [m.id, m]))
 
+// All possible durations across all models
+const ALL_DURATIONS = [4, 5, 6, 8, 10, 12, 15]
+
 type Resolution = "720p" | "1080p"
+
+/* ── Helper: snap raw seconds to nearest standard duration ── */
+function snapToStandardDuration(rawSeconds: number): number {
+  if (rawSeconds <= 0) return 5
+  return ALL_DURATIONS.reduce((prev, curr) =>
+    Math.abs(curr - rawSeconds) < Math.abs(prev - rawSeconds) ? curr : prev
+  )
+}
+
+/* ── Helper: get models that support a specific duration ── */
+function getCompatibleModels(duration: number): ModelInfo[] {
+  return MODELS.filter((m) => m.durations.includes(duration))
+}
 
 /* ── Scene State ── */
 interface SceneState {
   index: number
   model: string
-  duration: number
+  duration: number       // FIXED — snapped from timeline, does not change
   resolution: Resolution
   motionPrompt: string
   classification: string
@@ -55,15 +71,6 @@ function getPrice(modelId: string, duration: number, resolution: Resolution): nu
   if (!m) return 0
   const perSec = resolution === "1080p" ? m.price1080 : m.price720
   return perSec * duration
-}
-
-function getValidDuration(modelId: string, currentDuration: number): number {
-  const m = MODEL_MAP[modelId]
-  if (!m) return 8
-  if (m.durations.includes(currentDuration)) return currentDuration
-  return m.durations.reduce((prev, curr) =>
-    Math.abs(curr - currentDuration) < Math.abs(prev - currentDuration) ? curr : prev
-  )
 }
 
 /* ── API Helper ── */
@@ -93,17 +100,19 @@ export interface ProductionPanelProps {
 function SceneCard({
   scene,
   sceneData,
+  compatibleModels,
   onChange,
   onGenerate,
 }: {
   scene: SceneState
   sceneData: ZentrixScene
+  compatibleModels: ModelInfo[]
   onChange: (updates: Partial<SceneState>) => void
   onGenerate: () => void
 }) {
-  const model = MODEL_MAP[scene.model]
   const cost = getPrice(scene.model, scene.duration, scene.resolution)
   const hasPrompt = scene.motionPrompt.trim().length > 0
+  const isVeo = scene.model.startsWith("veo-")
 
   return (
     <div className={`rounded-xl border transition-all ${
@@ -113,7 +122,7 @@ function SceneCard({
       hasPrompt ? "border-indigo-500/30 bg-indigo-500/5" :
       "border-[var(--border-default)] bg-[var(--surface-1)]"
     }`}>
-      {/* Top: Image + Video preview side by side */}
+      {/* Top: Image + Video preview */}
       <div className="flex gap-2 p-3 pb-2">
         {/* Image thumbnail */}
         <div className="w-28 h-20 rounded-lg overflow-hidden bg-[var(--surface-2)] flex-shrink-0 relative">
@@ -166,8 +175,15 @@ function SceneCard({
         </div>
       </div>
 
-      {/* Description */}
+      {/* Duration (FIXED from timeline) + Description */}
       <div className="px-3 pb-1">
+        <div className="flex items-center gap-2 mb-0.5">
+          <span className="text-[10px] font-bold text-cyan-400 bg-cyan-400/10 px-2 py-0.5 rounded">
+            ⏱ {scene.duration}s
+          </span>
+          {isVeo && <span className="text-[8px] text-purple-400">Gemini escribe prompt</span>}
+          {!isVeo && scene.model !== "ken-burns" && <span className="text-[8px] text-blue-400">GLM 5.2 escribe prompt</span>}
+        </div>
         <div className="text-[10px] text-[var(--text-tertiary)] line-clamp-2">
           {sceneData.text_excerpt || sceneData.image_prompt || "Sin descripción"}
         </div>
@@ -181,38 +197,23 @@ function SceneCard({
         <textarea
           value={scene.motionPrompt}
           onChange={(e) => onChange({ motionPrompt: e.target.value })}
-          placeholder="GLM 5.2 escribirá el prompt al auto-preparar..."
+          placeholder={scene.model === "ken-burns" ? "Ken Burns no necesita prompt" : isVeo ? "Gemini escribirá el prompt..." : "GLM 5.2 escribirá el prompt al auto-preparar..."}
           rows={2}
-          disabled={scene.status === "generating" || scene.status === "done"}
+          disabled={scene.status === "generating" || scene.status === "done" || scene.model === "ken-burns"}
           className="w-full mt-1 px-2 py-1.5 text-[11px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded-lg text-white placeholder:text-[var(--text-tertiary)] resize-none focus:border-indigo-500/50 focus:outline-none disabled:opacity-50"
         />
       </div>
 
-      {/* Controls: Model + Duration + Resolution */}
+      {/* Controls: Model + Resolution (NO duration — it's fixed) */}
       <div className="px-3 pb-2 flex gap-1.5">
         <select
           value={scene.model}
-          onChange={(e) => {
-            const newModel = e.target.value
-            const newDur = getValidDuration(newModel, scene.duration)
-            onChange({ model: newModel, duration: newDur })
-          }}
+          onChange={(e) => onChange({ model: e.target.value })}
           disabled={scene.status === "generating" || scene.status === "done"}
           className="flex-1 px-1.5 py-1 text-[10px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded text-white disabled:opacity-50"
         >
-          {MODELS.map((m) => (
-            <option key={m.id} value={m.id}>{m.emoji} {m.name}</option>
-          ))}
-        </select>
-
-        <select
-          value={scene.duration}
-          onChange={(e) => onChange({ duration: parseInt(e.target.value) })}
-          disabled={scene.status === "generating" || scene.status === "done"}
-          className="w-14 px-1 py-1 text-[10px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded text-white text-center disabled:opacity-50"
-        >
-          {(MODEL_MAP[scene.model]?.durations || [8]).map((d) => (
-            <option key={d} value={d}>{d}s</option>
+          {compatibleModels.map((m) => (
+            <option key={m.id} value={m.id}>{m.emoji} {m.name} ({m.tier})</option>
           ))}
         </select>
 
@@ -251,7 +252,7 @@ function SceneCard({
   )
 }
 
-/* ── Main Production Panel (Fullscreen Modal) ── */
+/* ── Main Production Panel (Fullscreen) ── */
 export const ProductionPanel = memo(function ProductionPanel({
   isOpen,
   onClose,
@@ -260,34 +261,42 @@ export const ProductionPanel = memo(function ProductionPanel({
   onVideoGenerated,
 }: ProductionPanelProps) {
   const [scenes, setScenes] = useState<SceneState[]>([])
-  const [globalModel, setGlobalModel] = useState("pruna-video")
-  const [globalDuration, setGlobalDuration] = useState(10)
+  const [globalModel, setGlobalModel] = useState("ken-burns")
   const [globalResolution, setGlobalResolution] = useState<Resolution>("720p")
   const [isAutoPreparing, setIsAutoPreparing] = useState(false)
   const [isBatchGenerating, setIsBatchGenerating] = useState(false)
   const [statusMsg, setStatusMsg] = useState("")
-  const [autoPrepareDone, setAutoPrepareDone] = useState(false)
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
   const mountedRef = useRef(true)
 
-  // Initialize scenes from chapter data
+  // Initialize scenes — duration is FIXED from timeline
   useEffect(() => {
     if (!chapterData) return
     const initial: SceneState[] = chapterData.scenes
       .filter((s) => s.image_url)
-      .map((s) => ({
-        index: s.index,
-        model: s.video_url ? (s.video_model || "ken-burns") : "pruna-video",
-        duration: 10,
-        resolution: "720p" as Resolution,
-        motionPrompt: "",
-        classification: "",
-        status: s.video_url ? "done" as const : "pending" as const,
-        videoUrl: s.video_url || null,
-        errorMsg: "",
-      }))
+      .map((s) => {
+        // Duration comes from Gemini's audio timing — this is THE duration
+        const rawDuration = (s.end_time !== null && s.start_time !== null)
+          ? Math.round(s.end_time - s.start_time)
+          : 8
+        const duration = snapToStandardDuration(rawDuration)
+        // Default to first compatible model (Ken Burns always fits)
+        const compatible = getCompatibleModels(duration)
+        const defaultModel = compatible.find((m) => m.id === "ken-burns") ? "ken-burns" : compatible[0]?.id || "ken-burns"
+
+        return {
+          index: s.index,
+          model: s.video_url ? (s.video_model || defaultModel) : defaultModel,
+          duration, // FIXED — never changes
+          resolution: "720p" as Resolution,
+          motionPrompt: "",
+          classification: "",
+          status: s.video_url ? "done" as const : "pending" as const,
+          videoUrl: s.video_url || null,
+          errorMsg: "",
+        }
+      })
     setScenes(initial)
-    setAutoPrepareDone(false)
   }, [chapterData])
 
   useEffect(() => {
@@ -298,15 +307,33 @@ export const ProductionPanel = memo(function ProductionPanel({
     }
   }, [])
 
+  // Apply global model + resolution to compatible scenes only
   const applyGlobalToAll = useCallback(() => {
     setScenes((prev) =>
       prev.map((s) => {
         if (s.status === "done" || s.status === "generating") return s
-        const dur = getValidDuration(globalModel, globalDuration)
-        return { ...s, model: globalModel, duration: dur, resolution: globalResolution }
+        // Only apply if the global model supports this scene's duration
+        const compatible = getCompatibleModels(s.duration)
+        const canUseGlobal = compatible.some((m) => m.id === globalModel)
+        return {
+          ...s,
+          model: canUseGlobal ? globalModel : s.model,
+          resolution: globalResolution,
+        }
       })
     )
-  }, [globalModel, globalDuration, globalResolution])
+    // Tell user how many were updated
+    const total = scenes.filter((s) => s.status !== "done" && s.status !== "generating").length
+    const compatible = scenes.filter((s) => {
+      if (s.status === "done" || s.status === "generating") return false
+      return getCompatibleModels(s.duration).some((m) => m.id === globalModel)
+    }).length
+    if (compatible < total) {
+      setStatusMsg(`✅ ${compatible}/${total} escenas actualizadas. ${total - compatible} no son compatibles con ${MODEL_MAP[globalModel]?.name || globalModel} por su duración.`)
+    } else {
+      setStatusMsg(`✅ ${compatible} escenas actualizadas a ${MODEL_MAP[globalModel]?.name || globalModel} ${globalResolution}`)
+    }
+  }, [globalModel, globalResolution, scenes])
 
   const updateScene = useCallback((index: number, updates: Partial<SceneState>) => {
     setScenes((prev) =>
@@ -314,11 +341,11 @@ export const ProductionPanel = memo(function ProductionPanel({
     )
   }, [])
 
-  /* ── Auto-preparar: GLM 5.2 analiza imágenes ── */
+  /* ── Auto-preparar: GLM 5.2 / Gemini writes motion prompts ── */
   const handleAutoPrepare = useCallback(async () => {
     if (!chapterId) return
     setIsAutoPreparing(true)
-    setStatusMsg("🤖 GLM 5.2 está analizando cada imagen...")
+    setStatusMsg("🤖 Analizando cada imagen y escribiendo motion prompts...")
 
     try {
       const result = await apiFetch(
@@ -326,7 +353,7 @@ export const ProductionPanel = memo(function ProductionPanel({
         {
           method: "POST",
           body: JSON.stringify({
-            default_duration: globalDuration,
+            default_duration: 10,
             default_resolution: globalResolution,
           }),
         }
@@ -341,17 +368,14 @@ export const ProductionPanel = memo(function ProductionPanel({
             if (!prepared || s.status === "done") return s
             return {
               ...s,
-              model: prepared.model || s.model,
               motionPrompt: prepared.motion_prompt || s.motionPrompt,
               classification: prepared.classification || "",
-              duration: getValidDuration(prepared.model || s.model, globalDuration),
-              resolution: globalResolution,
               status: "ready" as const,
+              // Keep model and duration as-is — user already chose them
             }
           })
         )
-        setAutoPrepareDone(true)
-        setStatusMsg(`✅ ${result.scenes.length} escenas preparadas. Revisa los motion prompts y genera.`)
+        setStatusMsg(`✅ ${result.scenes.length} motion prompts escritos. Revisa y genera.`)
       } else {
         setStatusMsg("⚠️ Respuesta inesperada del servidor")
       }
@@ -361,7 +385,7 @@ export const ProductionPanel = memo(function ProductionPanel({
     } finally {
       if (mountedRef.current) setIsAutoPreparing(false)
     }
-  }, [chapterId, globalDuration, globalResolution])
+  }, [chapterId, globalResolution])
 
   /* ── Generate single scene ── */
   const generateScene = useCallback(async (sceneIndex: number) => {
@@ -398,7 +422,7 @@ export const ProductionPanel = memo(function ProductionPanel({
       (s) => (s.status === "pending" || s.status === "ready") && (s.motionPrompt.trim() || s.model === "ken-burns")
     )
     if (pendingScenes.length === 0) {
-      setStatusMsg("⚠️ No hay escenas listas. Auto-prepara primero.")
+      setStatusMsg("⚠️ No hay escenas listas. Auto-prepara los motion prompts primero.")
       return
     }
 
@@ -511,18 +535,16 @@ export const ProductionPanel = memo(function ProductionPanel({
     <div className="fixed inset-0 z-50 bg-[#0a0a0f] flex flex-col">
       {/* ═══ HEADER ═══ */}
       <div className="flex items-center justify-between px-6 py-3 border-b border-[var(--border-default)] bg-[var(--surface-0)]">
-        <div className="flex items-center gap-4">
-          <div>
-            <h1 className="text-sm font-bold text-white">
-              🎬 Producción — {chapterData.project_name}
-            </h1>
-            <p className="text-[10px] text-[var(--text-tertiary)]">
-              Cap {chapterData.chapter_number}: {chapterData.chapter_title} — {scenes.length} escenas con imagen
-            </p>
-          </div>
+        <div>
+          <h1 className="text-sm font-bold text-white">
+            🎬 Producción — {chapterData.project_name}
+          </h1>
+          <p className="text-[10px] text-[var(--text-tertiary)]">
+            Cap {chapterData.chapter_number}: {chapterData.chapter_title} — {scenes.length} escenas
+          </p>
         </div>
 
-        {/* Global Controls */}
+        {/* Global: Model + Resolution (NO duration — it's per-scene from timeline) */}
         <div className="flex items-center gap-3">
           <div className="flex flex-col">
             <label className="text-[8px] text-[var(--text-tertiary)] uppercase mb-0.5">Modelo global</label>
@@ -533,19 +555,6 @@ export const ProductionPanel = memo(function ProductionPanel({
             >
               {MODELS.map((m) => (
                 <option key={m.id} value={m.id}>{m.emoji} {m.name} ({m.tier})</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-col">
-            <label className="text-[8px] text-[var(--text-tertiary)] uppercase mb-0.5">Duración</label>
-            <select
-              value={globalDuration}
-              onChange={(e) => setGlobalDuration(parseInt(e.target.value))}
-              className="px-2 py-1 text-[10px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded text-white"
-            >
-              {(MODEL_MAP[globalModel]?.durations || [5, 8, 10]).map((d) => (
-                <option key={d} value={d}>{d}s</option>
               ))}
             </select>
           </div>
@@ -565,8 +574,9 @@ export const ProductionPanel = memo(function ProductionPanel({
           <button
             onClick={applyGlobalToAll}
             className="px-3 py-1.5 text-[10px] font-medium text-white bg-[var(--surface-2)] hover:bg-[var(--surface-3)] border border-[var(--border-default)] rounded-lg transition-colors mt-2.5"
+            title="Solo aplica a escenas cuya duración sea compatible con el modelo"
           >
-            Aplicar a todas
+            Aplicar a compatibles
           </button>
 
           <button
@@ -596,9 +606,9 @@ export const ProductionPanel = memo(function ProductionPanel({
             className="px-4 py-2 text-xs font-medium text-white bg-purple-600 hover:bg-purple-500 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-2"
           >
             {isAutoPreparing ? (
-              <><span className="animate-spin">🤖</span> GLM analizando...</>
+              <><span className="animate-spin">🤖</span> Escribiendo prompts...</>
             ) : (
-              <>🤖 Auto-preparar (GLM 5.2)</>
+              <>🤖 Auto-preparar prompts</>
             )}
           </button>
 
@@ -629,11 +639,13 @@ export const ProductionPanel = memo(function ProductionPanel({
           {scenes.map((scene) => {
             const sceneData = chapterData.scenes.find((s) => s.index === scene.index)
             if (!sceneData) return null
+            const compatibleModels = getCompatibleModels(scene.duration)
             return (
               <SceneCard
                 key={scene.index}
                 scene={scene}
                 sceneData={sceneData}
+                compatibleModels={compatibleModels}
                 onChange={(updates) => updateScene(scene.index, updates)}
                 onGenerate={() => generateScene(scene.index)}
               />
