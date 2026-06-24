@@ -5,7 +5,6 @@ import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/seq/
 import { useSidebar } from "@/seq/components/ui/sidebar"
 import { cn } from "@/seq/lib/utils"
 import { ArrowLeftFromLine, PanelLeft } from "lucide-react"
-import { IconTypelogo } from "../../typelogo"
 
 export interface EditorHeaderProps {
   onBack: () => void
@@ -66,19 +65,19 @@ export const EditorHeader = memo(function EditorHeader({
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs">
-              {visible ? "Hide Sidebar" : "Show Sidebar"}
+              {visible ? "Ocultar panel" : "Mostrar panel"}
             </TooltipContent>
           </Tooltip>
 
-          <IconTypelogo className="text-white" />
+          <span className="text-white font-bold text-lg tracking-wider">ZENTRIX</span>
 
           <span className="text-[10px] text-[var(--text-tertiary)] border border-[var(--border-emphasis)] rounded-full px-2 py-0.5">
-            Beta V0.2
+            V1.0
           </span>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* File Menu */}
+          {/* Menu Archivo */}
           <div className="relative" ref={fileMenuRef}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -87,7 +86,7 @@ export const EditorHeader = memo(function EditorHeader({
                   className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-[var(--text-secondary)] hover:text-white hover:bg-[var(--hover-overlay)] rounded-lg transition-colors"
                 >
                   <FolderOpenIcon className="w-4 h-4" />
-                  <span className="text-xs">File</span>
+                  <span className="text-xs">Archivo</span>
                   <svg
                     width="10"
                     height="10"
@@ -102,7 +101,7 @@ export const EditorHeader = memo(function EditorHeader({
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
-                File Menu
+                Menú de archivo
               </TooltipContent>
             </Tooltip>
 
@@ -117,7 +116,7 @@ export const EditorHeader = memo(function EditorHeader({
                   className="w-full px-3 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--hover-overlay)] hover:text-white flex items-center gap-2 disabled:opacity-50"
                 >
                   <SaveIcon className={`w-4 h-4 ${isSaving ? "animate-pulse" : ""}`} />
-                  Save Project
+                  Guardar proyecto
                   <span className="ml-auto text-xs text-[var(--text-tertiary)]">⌘S</span>
                 </button>
                 <button
@@ -128,7 +127,7 @@ export const EditorHeader = memo(function EditorHeader({
                   className="w-full px-3 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--hover-overlay)] hover:text-white flex items-center gap-2"
                 >
                   <FolderOpenIcon className="w-4 h-4" />
-                  Open Project
+                  Abrir proyecto
                   <span className="ml-auto text-xs text-[var(--text-tertiary)]">⌘O</span>
                 </button>
                 <div className="h-px bg-[var(--border-default)] my-1" />
@@ -143,13 +142,13 @@ export const EditorHeader = memo(function EditorHeader({
                     <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
                     <circle cx="12" cy="13" r="3" />
                   </svg>
-                  Load Demo Project
+                  Cargar proyecto demo
                 </button>
               </div>
             )}
           </div>
 
-          {/* Undo/Redo */}
+          {/* Deshacer/Rehacer */}
           <div className="flex items-center">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -162,7 +161,7 @@ export const EditorHeader = memo(function EditorHeader({
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
-                Undo <span className="text-[var(--text-tertiary)]">(⌘Z)</span>
+                Deshacer <span className="text-[var(--text-tertiary)]">(⌘Z)</span>
               </TooltipContent>
             </Tooltip>
 
@@ -177,7 +176,7 @@ export const EditorHeader = memo(function EditorHeader({
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
-                Redo <span className="text-[var(--text-tertiary)]">(⌘⇧Z)</span>
+                Rehacer <span className="text-[var(--text-tertiary)]">(⌘⇧Z)</span>
               </TooltipContent>
             </Tooltip>
           </div>
@@ -196,11 +195,11 @@ export const EditorHeader = memo(function EditorHeader({
                   <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
                   <path d="M12 17h.01" />
                 </svg>
-                Learn
+                Atajos
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs">
-              Keyboard Shortcuts
+              Atajos de teclado
             </TooltipContent>
           </Tooltip>
 
@@ -211,11 +210,11 @@ export const EditorHeader = memo(function EditorHeader({
                 className="flex items-center gap-1.5 px-3 py-1.5 text-white bg-[var(--active-overlay)] hover:bg-[var(--hover-overlay)] border border-[var(--border-emphasis)] rounded-full text-xs font-medium transition-colors"
               >
                 <DownloadIcon className="w-3.5 h-3.5" />
-                Export
+                Exportar
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs">
-              Export Project <span className="text-[var(--text-tertiary)]">(⌘E)</span>
+              Exportar proyecto <span className="text-[var(--text-tertiary)]">(⌘E)</span>
             </TooltipContent>
           </Tooltip>
         </div>
