@@ -73,6 +73,7 @@ export interface ZentrixPanelProps {
   onClose: () => void
   onLoadChapter: (result: ZentrixChapterWithTiming) => void
   onClearProject: () => void
+  onOpenProduction?: () => void
 }
 
 /* ── Login Form ── */
@@ -293,11 +294,13 @@ function LoadedInfo({
   hasTiming,
   onLoadAnother,
   onClear,
+  onOpenProduction,
 }: {
   data: ZentrixEditorData
   hasTiming: boolean
   onLoadAnother: () => void
   onClear: () => void
+  onOpenProduction?: () => void
 }) {
   const videoCount = data.scenes.filter((s) => s.video_url).length
   const imageCount = data.scenes.filter((s) => s.image_url && !s.video_url).length
@@ -330,6 +333,17 @@ function LoadedInfo({
           )}
         </div>
       </div>
+
+      {/* PRODUCTION BUTTON - opens fullscreen modal */}
+      {imageCount > 0 && onOpenProduction && (
+        <button
+          onClick={onOpenProduction}
+          className="w-full py-2.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors flex items-center justify-center gap-2"
+        >
+          🎬 Producir Capítulo
+        </button>
+      )}
+
       <button
         onClick={onLoadAnother}
         className="w-full py-2 text-xs text-[var(--text-secondary)] hover:text-white border border-[var(--border-default)] hover:border-[var(--border-strong)] rounded-lg transition-colors"
@@ -347,7 +361,7 @@ function LoadedInfo({
 }
 
 /* ── Main Panel ── */
-export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter, onClearProject }: ZentrixPanelProps) {
+export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter, onClearProject, onOpenProduction }: ZentrixPanelProps) {
   const [token, setToken] = useState<string | null>(() => {
     if (typeof window !== "undefined") return localStorage.getItem(TOKEN_KEY)
     return null
@@ -401,7 +415,7 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter,
         {!token ? (
           <LoginForm onLogin={handleLogin} error={loginError} />
         ) : loadedData ? (
-          <LoadedInfo data={loadedData} hasTiming={hasTiming} onLoadAnother={() => setLoadedData(null)} onClear={() => { setLoadedData(null); onClearProject(); }} />
+          <LoadedInfo data={loadedData} hasTiming={hasTiming} onLoadAnother={() => setLoadedData(null)} onClear={() => { setLoadedData(null); onClearProject(); }} onOpenProduction={onOpenProduction} />
         ) : (
           <ChapterSelector token={token} onLoad={handleLoad} onLogout={handleLogout} />
         )}
