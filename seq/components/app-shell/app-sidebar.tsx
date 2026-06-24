@@ -19,17 +19,17 @@ interface AppSidebarProps {
 }
 
 const NAV_ITEMS = [
-  { id: "home", href: "/", icon: Home, label: "Home", miniLabel: "Home", shortcut: "H" },
+  { id: "home", href: "/", icon: Home, label: "Inicio", miniLabel: "Inicio", shortcut: "H" },
   {
     id: "image-playground",
     href: "/image-playground",
     icon: ImageIcon,
-    label: "Image Playground",
-    miniLabel: "Images",
+    label: "Imágenes",
+    miniLabel: "Imágenes",
     shortcut: "I",
   },
-  { id: "storyboard", href: "/storyboard", icon: LayoutGrid, label: "Storyboard", miniLabel: "Boards", shortcut: "S" },
-  { id: "studio", href: "/timeline", icon: Film, label: "Video Timeline", miniLabel: "Timeline", shortcut: "T" },
+  { id: "storyboard", href: "/storyboard", icon: LayoutGrid, label: "Storyboard", miniLabel: "Paneles", shortcut: "S" },
+  { id: "studio", href: "/timeline", icon: Film, label: "Editor de Video", miniLabel: "Editor", shortcut: "T" },
 ] as const
 
 const STUDIO_ITEMS: {
@@ -39,12 +39,12 @@ const STUDIO_ITEMS: {
   miniLabel: string
   shortcut?: string
 }[] = [
-  { id: "create", icon: PlusSquare, label: "Create", miniLabel: "Create", shortcut: "1" },
-  { id: "library", icon: Layers, label: "Library", miniLabel: "Library", shortcut: "2" },
-  { id: "storyboard", icon: LayoutGrid, label: "Storyboard", miniLabel: "Panels", shortcut: "3" },
-  { id: "transitions", icon: SlidersHorizontal, label: "Transitions", miniLabel: "Effects", shortcut: "4" },
-  { id: "inspector", icon: Info, label: "Inspector", miniLabel: "Details", shortcut: "5" },
-  { id: "settings", icon: Settings, label: "Settings", miniLabel: "Config", shortcut: "6" },
+  { id: "create", icon: PlusSquare, label: "Crear", miniLabel: "Crear", shortcut: "1" },
+  { id: "library", icon: Layers, label: "Biblioteca", miniLabel: "Biblioteca", shortcut: "2" },
+  { id: "storyboard", icon: LayoutGrid, label: "Storyboard", miniLabel: "Paneles", shortcut: "3" },
+  { id: "transitions", icon: SlidersHorizontal, label: "Transiciones", miniLabel: "Efectos", shortcut: "4" },
+  { id: "inspector", icon: Info, label: "Inspector", miniLabel: "Detalles", shortcut: "5" },
+  { id: "settings", icon: Settings, label: "Configuración", miniLabel: "Config", shortcut: "6" },
 ]
 
 export function AppSidebar({ activeView, isPanelOpen, onViewChange, onTogglePanel }: AppSidebarProps) {
@@ -186,11 +186,10 @@ export function AppSidebar({ activeView, isPanelOpen, onViewChange, onTogglePane
           )}
         </nav>
 
-        {/* Footer with credits */}
+        {/* Footer */}
         <div className="border-t border-[var(--border-default)] p-3">
           <div className="flex flex-col items-center gap-0.5 text-center">
-            <span className="text-sm font-semibold text-white">∞</span>
-            <span className="text-[10px] text-[var(--text-tertiary)]">Credits</span>
+            <span className="text-[9px] font-bold text-[var(--text-tertiary)] tracking-wider">ZENTRIX</span>
           </div>
         </div>
       </aside>
