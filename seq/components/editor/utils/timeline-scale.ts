@@ -1,22 +1,27 @@
 export interface ZoomConfig {
   pixelsPerSecond: number;
-  majorInterval: number; // seconds between major numbered ticks
-  minorDivisions: number; // number of subdivisions between major ticks
+  majorInterval: number;
+  minorDivisions: number;
 }
 
-// Discrete zoom levels optimized for video editing
 export const ZOOM_CONFIGS: ZoomConfig[] = [
-  { pixelsPerSecond: 5, majorInterval: 60, minorDivisions: 12 },  // ~5px/s: Show 1m, ticks every 5s
-  { pixelsPerSecond: 10, majorInterval: 30, minorDivisions: 6 },  // ~10px/s: Show 30s, ticks every 5s
-  { pixelsPerSecond: 20, majorInterval: 10, minorDivisions: 10 }, // ~20px/s: Show 10s, ticks every 1s
-  { pixelsPerSecond: 40, majorInterval: 5, minorDivisions: 5 },   // ~40px/s: Show 5s, ticks every 1s (Default)
-  { pixelsPerSecond: 80, majorInterval: 1, minorDivisions: 2 },   // ~80px/s: Show 1s, ticks every 0.5s
-  { pixelsPerSecond: 160, majorInterval: 1, minorDivisions: 5 },  // ~160px/s: Show 1s, ticks every 0.2s
-  { pixelsPerSecond: 320, majorInterval: 0.5, minorDivisions: 5 },// ~320px/s: Show 0.5s, ticks every 0.1s
+  { pixelsPerSecond: 2, majorInterval: 120, minorDivisions: 12 },
+  { pixelsPerSecond: 5, majorInterval: 60, minorDivisions: 12 },
+  { pixelsPerSecond: 8, majorInterval: 30, minorDivisions: 6 },
+  { pixelsPerSecond: 12, majorInterval: 30, minorDivisions: 6 },
+  { pixelsPerSecond: 18, majorInterval: 15, minorDivisions: 3 },
+  { pixelsPerSecond: 25, majorInterval: 10, minorDivisions: 5 },
+  { pixelsPerSecond: 35, majorInterval: 10, minorDivisions: 10 },
+  { pixelsPerSecond: 50, majorInterval: 5, minorDivisions: 5 },
+  { pixelsPerSecond: 70, majorInterval: 5, minorDivisions: 5 },
+  { pixelsPerSecond: 100, majorInterval: 2, minorDivisions: 4 },
+  { pixelsPerSecond: 150, majorInterval: 1, minorDivisions: 2 },
+  { pixelsPerSecond: 200, majorInterval: 1, minorDivisions: 4 },
+  { pixelsPerSecond: 300, majorInterval: 1, minorDivisions: 5 },
+  { pixelsPerSecond: 500, majorInterval: 0.5, minorDivisions: 5 },
 ];
 
 export function getZoomConfig(zoom: number): ZoomConfig {
-    // Find the configuration that closest matches the current zoom level
     return ZOOM_CONFIGS.reduce((prev, curr) => 
         Math.abs(curr.pixelsPerSecond - zoom) < Math.abs(prev.pixelsPerSecond - zoom) ? curr : prev
     );
