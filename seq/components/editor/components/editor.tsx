@@ -291,6 +291,8 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
   // UI State - Use constants for default values
   const [activeView, setActiveView] = useState<SidebarView>("library")
   const [loadedChapterId, setLoadedChapterId] = useState<string | null>(null)
+  const [loadedChapterData, setLoadedChapterData] = useState<ZentrixEditorData | null>(null)
+  const [isProductionModalOpen, setIsProductionModalOpen] = useState(false)
   const [isPanelOpen, setIsPanelOpen] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
   const [apiKeyReady, setApiKeyReady] = useState(false) // Was not in updates, keeping it
@@ -1403,16 +1405,30 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                       )}
                       {activeView === "create" && (
                         <PanelErrorBoundary fallbackTitle="Production Panel Error">
-                          <ProductionPanel
-                            onClose={() => setIsPanelOpen(false)}
-                            media={timeline.media}
-                            chapterId={loadedChapterId}
-                            onUpdateMedia={(id, updates) => {
-                              timeline.setMedia((prev) =>
-                                prev.map((m) => (m.id === id ? { ...m, ...updates } : m))
-                              )
-                            }}
-                          />
+                          <div className="flex h-full w-[320px] flex-col border-r border-[var(--border-default)] bg-[var(--surface-0)]">
+                            <div className="flex h-10 items-center justify-between border-b border-[var(--border-default)] px-4">
+                              <span className="text-xs font-semibold text-white">🎬 Producción</span>
+                              <button onClick={() => setIsPanelOpen(false)} className="text-[var(--text-tertiary)] hover:text-white text-xs">✕</button>
+                            </div>
+                            <div className="flex-1 flex items-center justify-center p-6 text-center">
+                              {loadedChapterId && loadedChapterData ? (
+                                <div className="space-y-3">
+                                  <div className="text-sm text-white font-medium">{loadedChapterData.project_name}</div>
+                                  <div className="text-xs text-[var(--text-secondary)]">Cap {loadedChapterData.chapter_number}: {loadedChapterData.chapter_title}</div>
+                                  <button
+                                    onClick={() => setIsProductionModalOpen(true)}
+                                    className="w-full py-2.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors"
+                                  >
+                                    🎬 Abrir Ventana de Producción
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="text-xs text-[var(--text-tertiary)]">
+                                  Carga un capítulo desde el panel Zentrix primero.
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </PanelErrorBoundary>
                       )}
                       {activeView === "settings" && (
@@ -1492,13 +1508,16 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                         <PanelErrorBoundary fallbackTitle="Zentrix Error">
                           <ZentrixPanel
                             onClose={() => setIsPanelOpen(false)}
+                            onOpenProduction={() => setIsProductionModalOpen(true)}
                             onClearProject={() => {
                               timeline.setMedia([])
                               timeline.setTimelineClips([])
-                            }}
+                              setLoadedChapterData(null)
+                            }}}
                             onLoadChapter={(result: ZentrixChapterWithTiming) => {
                               const { data, timing, chapterId: chapId } = result
                               setLoadedChapterId(chapId)
+                              setLoadedChapterData(data)
                               const mediaItems: MediaItem[] = []
                               const clips: TimelineClip[] = []
 
@@ -1744,6 +1763,22 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
           onClose={() => setShowAddMarkerDialog(false)}
           onAdd={handleAddMarker}
           time={playback.currentTime} // Use playback.currentTime for the marker time
+        />
+
+        {/* Production Panel (fullscreen modal) */}
+        <ProductionPanel
+          isOpen={isProductionModalOpen}
+          onClose={() => setIsProductionModalOpen(false)}
+          chapterData={loadedChapterData}
+          chapterId={loadedChapterId}
+          onVideoGenerated={(sceneIndex, videoUrl) => {
+            const mediaId = `zentrix-s${sceneIndex}`
+            timeline.setMedia((prev) =>
+              prev.map((m) =>
+                m.id === mediaId ? { ...m, url: videoUrl, type: "video" as const } : m
+              )
+            )
+          }}
         />
       </div>
     </SidebarProvider>
