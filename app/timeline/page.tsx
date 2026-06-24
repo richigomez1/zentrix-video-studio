@@ -2,11 +2,10 @@ import Editor from "@/seq/components/editor/app"
 import { Metadata } from "next"
 
 export const metadata: Metadata = {
-  title: "Timeline Editor - Seq",
-  description: "Professional magnetic timeline editor for video sequencing",
+  title: "Zentrix Video Studio",
+  description: "Editor de video profesional con IA para producción de contenido YouTube",
 }
 
-// The demo parameter is handled inside TimelineEditor via useSearchParams
 export default function TimelinePage() {
   return <Editor />
 }
