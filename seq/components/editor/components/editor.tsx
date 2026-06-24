@@ -1543,7 +1543,7 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                               timeline.setTimelineClips([])
                               setLoadedChapterId(null)
                               setLoadedChapterData(null)
-                            }}}
+                            }}
                             onLoadChapter={(result: ZentrixChapterWithTiming) => {
                               const { data, timing, chapterId: chapId } = result
                               setLoadedChapterId(chapId)
