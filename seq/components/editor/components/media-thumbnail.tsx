@@ -110,7 +110,6 @@ export const MediaThumbnail = memo(function MediaThumbnail({
               loop
               playsInline
               preload="metadata"
-              crossOrigin="anonymous"
               onLoadedData={handleLoadedData}
             />
           ) : item.type === "image" ? (

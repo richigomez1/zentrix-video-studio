@@ -1344,7 +1344,6 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                   if (el) playback.audioRefs.current[track.id] = el
                 }}
                 className="hidden"
-                crossOrigin="anonymous"
               />
             ))}
           <canvas ref={playback.canvasRef as React.RefObject<HTMLCanvasElement>} className="hidden" />
@@ -1658,5 +1657,3 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
 }
 
 export default Editor
-
-                
