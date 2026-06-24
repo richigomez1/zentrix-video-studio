@@ -56,9 +56,21 @@ export interface ZentrixEditorData {
   scenes: ZentrixScene[]
 }
 
+export interface TimingEntry {
+  index: number
+  start_time: number
+  end_time: number
+  duration: number
+}
+
+export interface ZentrixChapterWithTiming {
+  data: ZentrixEditorData
+  timing: TimingEntry[] | null
+}
+
 export interface ZentrixPanelProps {
   onClose: () => void
-  onLoadChapter: (data: ZentrixEditorData) => void
+  onLoadChapter: (result: ZentrixChapterWithTiming) => void
 }
 
 /* ── Login Form ── */
@@ -114,7 +126,7 @@ function ChapterSelector({
   onLogout,
 }: {
   token: string
-  onLoad: (data: ZentrixEditorData) => void
+  onLoad: (result: ZentrixChapterWithTiming) => void
   onLogout: () => void
 }) {
   const [projects, setProjects] = useState<ZentrixProject[]>([])
@@ -123,16 +135,15 @@ function ChapterSelector({
   const [selChapter, setSelChapter] = useState("")
   const [loading, setLoading] = useState(false)
   const [loadingChapters, setLoadingChapters] = useState(false)
+  const [status, setStatus] = useState("")
   const [error, setError] = useState("")
 
-  // Load projects
   useEffect(() => {
     apiFetch("/api/image-studio/projects", token)
       .then((d) => setProjects(Array.isArray(d) ? d : d.projects || []))
       .catch((e) => setError(e.message))
   }, [token])
 
-  // Load chapters when project selected
   useEffect(() => {
     if (!selProject) { setChapters([]); setSelChapter(""); return }
     setLoadingChapters(true)
@@ -143,18 +154,60 @@ function ChapterSelector({
       .finally(() => setLoadingChapters(false))
   }, [selProject, token])
 
-  // Load chapter into editor
   const handleLoad = async () => {
     if (!selChapter) return
     setLoading(true)
     setError("")
+    setStatus("📥 Cargando datos del capítulo...")
+
     try {
-      const data = await apiFetch(`/api/image-studio/chapters/${selChapter}/editor-data`, token)
-      onLoad(data)
+      // Step 1: Get chapter data from backend
+      const data: ZentrixEditorData = await apiFetch(
+        `/api/image-studio/chapters/${selChapter}/editor-data`,
+        token,
+      )
+
+      // Step 2: If there's audio, ask Gemini to analyze timing
+      let timing: TimingEntry[] | null = null
+
+      if (data.audio_url && data.scenes.length > 0) {
+        setStatus("🎵 Gemini está analizando el audio...")
+        try {
+          const analyzeRes = await fetch("/api/seq/analyze-audio", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              audio_url: data.audio_url,
+              audio_duration: data.audio_duration,
+              scenes: data.scenes.map((s) => ({
+                index: s.index,
+                text_excerpt: s.text_excerpt,
+                image_prompt: s.image_prompt,
+              })),
+            }),
+          })
+
+          if (analyzeRes.ok) {
+            const analyzeData = await analyzeRes.json()
+            timing = analyzeData.timing
+            setStatus("✅ Audio analizado — colocando escenas...")
+          } else {
+            const err = await analyzeRes.json()
+            console.warn("Gemini analysis failed, using fallback:", err)
+            setStatus("⚠️ Gemini no disponible — usando tiempos calculados...")
+          }
+        } catch (e) {
+          console.warn("Gemini analysis error:", e)
+          setStatus("⚠️ Error de análisis — usando tiempos calculados...")
+        }
+      }
+
+      onLoad({ data, timing })
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Error al cargar")
     } finally {
       setLoading(false)
+      setStatus("")
     }
   }
 
@@ -170,7 +223,6 @@ function ChapterSelector({
         </button>
       </div>
 
-      {/* Project selector */}
       <div>
         <label className="text-[10px] font-medium text-[var(--text-tertiary)] mb-1 block">Proyecto</label>
         <select
@@ -180,14 +232,11 @@ function ChapterSelector({
         >
           <option value="">— Seleccionar proyecto —</option>
           {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
+            <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </select>
       </div>
 
-      {/* Chapter selector */}
       {selProject && (
         <div>
           <label className="text-[10px] font-medium text-[var(--text-tertiary)] mb-1 block">Capítulo</label>
@@ -212,21 +261,25 @@ function ChapterSelector({
 
       {error && <div className="text-xs text-red-400">{error}</div>}
 
-      {/* Load button */}
-      {selChapter && (
+      {status && (
+        <div className="text-xs text-amber-400 bg-amber-400/10 rounded-lg px-3 py-2 animate-pulse">
+          {status}
+        </div>
+      )}
+
+      {selChapter && !loading && (
         <button
           onClick={handleLoad}
-          disabled={loading}
-          className="w-full py-2.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+          className="w-full py-2.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors flex items-center justify-center gap-2"
         >
-          {loading ? (
-            <>
-              <span className="animate-pulse">⏳</span> Cargando escenas...
-            </>
-          ) : (
-            <>🚀 Cargar en Timeline</>
-          )}
+          🚀 Cargar en Timeline
         </button>
+      )}
+
+      {loading && (
+        <div className="w-full py-2.5 text-sm font-medium text-center text-indigo-300 bg-indigo-600/30 rounded-lg">
+          ⏳ Procesando...
+        </div>
       )}
     </div>
   )
@@ -235,9 +288,11 @@ function ChapterSelector({
 /* ── Loaded Chapter Info ── */
 function LoadedInfo({
   data,
+  hasTiming,
   onLoadAnother,
 }: {
   data: ZentrixEditorData
+  hasTiming: boolean
   onLoadAnother: () => void
 }) {
   const videoCount = data.scenes.filter((s) => s.video_url).length
@@ -263,6 +318,13 @@ function LoadedInfo({
             🎙 Audio: {Math.round(data.audio_duration || 0)}s
           </div>
         )}
+        <div className="text-[10px]">
+          {hasTiming ? (
+            <span className="text-green-400">🤖 Tiempos analizados por Gemini</span>
+          ) : (
+            <span className="text-[var(--text-tertiary)]">📐 Tiempos calculados (sin Gemini)</span>
+          )}
+        </div>
       </div>
       <button
         onClick={onLoadAnother}
@@ -282,6 +344,7 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter 
   })
   const [loginError, setLoginError] = useState("")
   const [loadedData, setLoadedData] = useState<ZentrixEditorData | null>(null)
+  const [hasTiming, setHasTiming] = useState(false)
 
   const handleLogin = useCallback(async (email: string, pass: string) => {
     setLoginError("")
@@ -304,16 +367,16 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter 
   }, [])
 
   const handleLoad = useCallback(
-    (data: ZentrixEditorData) => {
-      setLoadedData(data)
-      onLoadChapter(data)
+    (result: ZentrixChapterWithTiming) => {
+      setLoadedData(result.data)
+      setHasTiming(!!result.timing)
+      onLoadChapter(result)
     },
     [onLoadChapter],
   )
 
   return (
     <div className="flex h-full w-[320px] flex-col border-r border-[var(--border-default)] bg-[var(--surface-0)]">
-      {/* Header */}
       <div className="flex h-10 items-center justify-between border-b border-[var(--border-default)] px-4">
         <span className="text-xs font-semibold text-white">Zentrix</span>
         <button
@@ -324,18 +387,16 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter 
         </button>
       </div>
 
-      {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {!token ? (
           <LoginForm onLogin={handleLogin} error={loginError} />
         ) : loadedData ? (
-          <LoadedInfo data={loadedData} onLoadAnother={() => setLoadedData(null)} />
+          <LoadedInfo data={loadedData} hasTiming={hasTiming} onLoadAnother={() => setLoadedData(null)} />
         ) : (
           <ChapterSelector token={token} onLoad={handleLoad} onLogout={handleLogout} />
         )}
       </div>
 
-      {/* Footer */}
       <div className="border-t border-[var(--border-default)] px-4 py-2">
         <div className="text-[9px] text-[var(--text-tertiary)] text-center">
           {token ? "🟢 Conectado a Image Studio" : "🔴 No conectado"}
