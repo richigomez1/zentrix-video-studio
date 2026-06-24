@@ -28,7 +28,7 @@ import { SettingsPanel } from "./settings-panel"
 import { TransitionsPanel } from "./transitions-panel"
 import { InspectorPanel } from "./inspector-panel"
 import { StoryboardPanel as StoryboardPanelComponent } from "./storyboard-panel"
-import { ZentrixPanel, type ZentrixEditorData } from "./zentrix-panel"
+import { ZentrixPanel, type ZentrixEditorData, type ZentrixChapterWithTiming } from "./zentrix-panel"
 import { ExportModal } from "./export-modal"
 import { ShortcutsModal } from "./shortcuts-modal"
 import { Timeline } from "./timeline"
@@ -1487,16 +1487,29 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                         <PanelErrorBoundary fallbackTitle="Zentrix Error">
                           <ZentrixPanel
                             onClose={() => setIsPanelOpen(false)}
-                            onLoadChapter={(data: ZentrixEditorData) => {
+                            onLoadChapter={(result: ZentrixChapterWithTiming) => {
+                              const { data, timing } = result
                               const mediaItems: MediaItem[] = []
                               const clips: TimelineClip[] = []
 
-                              // Calculate duration per scene based on audio
                               const validScenes = data.scenes.filter((s) => s.video_url || s.image_url)
                               const audioDuration = data.audio_duration || 60
-                              const durationPerScene = audioDuration / (validScenes.length || 1)
 
-                              let currentTime = 0
+                              // Build timing map from Gemini or fallback
+                              const timingMap = new Map<number, { start: number; duration: number }>()
+
+                              if (timing && timing.length > 0) {
+                                // Use Gemini's analysis
+                                for (const t of timing) {
+                                  timingMap.set(t.index, { start: t.start_time, duration: t.end_time - t.start_time })
+                                }
+                              } else {
+                                // Fallback: divide audio evenly
+                                const perScene = audioDuration / (validScenes.length || 1)
+                                validScenes.forEach((s, i) => {
+                                  timingMap.set(s.index, { start: i * perScene, duration: perScene })
+                                })
+                              }
 
                               for (const scene of validScenes) {
                                 const url = scene.video_url || scene.image_url
@@ -1504,18 +1517,13 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
 
                                 const mediaId = `zentrix-s${scene.index}`
                                 const isVideo = !!scene.video_url
-                                
-                                // For videos: use actual video duration (capped to not exceed slot)
-                                // For images: use calculated duration from audio
-                                const sceneDuration = isVideo
-                                  ? Math.min(durationPerScene, (scene.end_time && scene.start_time) ? (scene.end_time - scene.start_time) : durationPerScene)
-                                  : durationPerScene
+                                const t = timingMap.get(scene.index) || { start: 0, duration: 10 }
 
                                 mediaItems.push({
                                   id: mediaId,
                                   url,
                                   prompt: scene.image_prompt || scene.text_excerpt || `Escena ${scene.index + 1}`,
-                                  duration: sceneDuration,
+                                  duration: t.duration,
                                   aspectRatio: "16:9",
                                   thumbnailUrl: scene.image_url || undefined,
                                   status: "ready",
@@ -1528,13 +1536,11 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                                   id: `clip-z-${scene.index}-${Date.now()}`,
                                   mediaId,
                                   trackId: "v1",
-                                  start: currentTime,
-                                  duration: sceneDuration,
+                                  start: t.start,
+                                  duration: t.duration,
                                   offset: 0,
                                   volume: 1,
                                 })
-
-                                currentTime += sceneDuration
                               }
 
                               // Add audio
@@ -1561,7 +1567,6 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                                 })
                               }
 
-                              // Replace everything
                               timeline.setMedia(mediaItems)
                               setTimeout(() => {
                                 timeline.setTimelineClips(clips)
