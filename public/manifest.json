@@ -1,7 +1,7 @@
 {
-  "name": "Seq AI Studio",
-  "short_name": "Seq",
-  "description": "AI-powered video creation and editing studio.",
+  "name": "Zentrix Video Studio",
+  "short_name": "Zentrix",
+  "description": "Estudio de producción de video con IA para YouTube.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",
