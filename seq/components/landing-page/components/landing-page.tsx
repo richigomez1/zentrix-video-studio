@@ -112,7 +112,7 @@ const TRENDING_ITEMS = [
     plays: "12K",
     likes: 206,
     duration: "1:24",
-    badge: "Made with Seq",
+    badge: "Zentrix Video Studio",
     thumbnail: "/sunset-cinematic-transition-thumbnail.jpg",
   },
   {
@@ -482,9 +482,9 @@ export const LandingPage: React.FC = () => {
           <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
             <div className="flex items-center gap-2">
               <LogoIcon className="w-5 h-5 text-[var(--accent-primary)]" />
-              <span className="font-semibold text-white">Seq</span>
+              <span className="font-semibold text-white">Zentrix</span>
             </div>
-            <div className="text-xs text-neutral-500">© 2025 Seq. All rights reserved.</div>
+            <div className="text-xs text-neutral-500">© 2026 Zentrix. Todos los derechos reservados.</div>
             <div className="flex gap-4">
               <a href="#" className="text-xs text-neutral-400 hover:text-white transition-colors">
                 Twitter
