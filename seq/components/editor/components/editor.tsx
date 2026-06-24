@@ -28,6 +28,7 @@ import { SettingsPanel } from "./settings-panel"
 import { TransitionsPanel } from "./transitions-panel"
 import { InspectorPanel } from "./inspector-panel"
 import { StoryboardPanel as StoryboardPanelComponent } from "./storyboard-panel"
+import { ZentrixPanel } from "./zentrix-panel"
 import { ExportModal } from "./export-modal"
 import { ShortcutsModal } from "./shortcuts-modal"
 import { Timeline } from "./timeline"
@@ -1483,6 +1484,17 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                           />
                         </PanelErrorBoundary>
                       )}
+                      {activeView === "zentrix" && (
+                        <PanelErrorBoundary fallbackTitle="Zentrix Error">
+                          <ZentrixPanel
+                            onClose={() => setIsPanelOpen(false)}
+                            onLoadMedia={(items) => {
+                              timeline.setMedia((prev) => [...items, ...prev])
+                              setActiveView("library")
+                            }}
+                          />
+                        </PanelErrorBoundary>
+                      )}
                     </ErrorBoundary>
 
                     {/* Sidebar resize handle */}
@@ -1646,3 +1658,5 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
 }
 
 export default Editor
+
+                
