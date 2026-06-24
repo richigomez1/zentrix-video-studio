@@ -1,5 +1,3 @@
-import { IconTypelogo } from "../../typelogo";
-
 export function MobileEditorNotice() {
   return (
     <div className="flex w-full flex-1 flex-col overflow-y-auto md:flex-row">
@@ -15,14 +13,14 @@ export function MobileEditorNotice() {
                 <div className="flex h-[500px] w-full max-w-[360px] flex-col overflow-hidden rounded-[32px] border border-border-secondary">
                   <div className="h-[60%]">
                     <img
-                      alt="Seq Studio Mobile"
+                      alt="Zentrix Video Studio"
                       className="h-full w-full object-cover object-bottom"
                       src="/images/studio_mobile_web.png"
                     />
                   </div>
                   <div className="flex h-[40%] flex-col items-center justify-end gap-2 p-4">
                     <div className="flex-shrink-0">
-                      <IconTypelogo className="text-white" />
+                      <span className="text-white font-bold text-xl tracking-wider">ZENTRIX</span>
                     </div>
                     <p
                       className="flex-shrink-0 text-center text-muted-foreground h-5 min-h-5"
@@ -33,7 +31,7 @@ export function MobileEditorNotice() {
                         lineHeight: "20px",
                       }}
                     >
-                      Seq Studio is currently desktop-only.
+                      Zentrix Video Studio solo está disponible en escritorio.
                     </p>
                     <div className="mt-2 flex flex-shrink-0 flex-row gap-2">
                       <a
@@ -41,7 +39,7 @@ export function MobileEditorNotice() {
                         href="/"
                       >
                         <span className="relative flex flex-row items-center justify-center gap-2">
-                          Back Home
+                          Volver al inicio
                         </span>
                       </a>
                     </div>
