@@ -35,6 +35,42 @@ const MODELS: ModelInfo[] = [
 
 const MODEL_MAP = Object.fromEntries(MODELS.map((m) => [m.id, m]))
 
+/* ── Tier Presets: auto-assign model by duration ── */
+type TierName = "economico" | "equilibrado"
+
+const TIER_CONFIG: Record<TierName, { label: string; emoji: string; color: string; description: string; mapping: Record<number, string> }> = {
+  economico: {
+    label: "Económico",
+    emoji: "🟢",
+    color: "bg-emerald-600 hover:bg-emerald-500",
+    description: "PrunaAI + SD 1.0 Fast",
+    mapping: {
+      4: "seedance-1-pro-fast",   // $0.025/s — SD 1.0 Fast
+      5: "pruna-video",           // $0.02/s — PrunaAI
+      6: "seedance-1-pro-fast",   // $0.025/s
+      8: "seedance-1-pro-fast",   // $0.025/s
+      10: "pruna-video",          // $0.02/s
+      12: "seedance-1-pro-fast",  // $0.025/s
+      15: "seedance-2.0-fast",    // $0.15/s — único que soporta 15s (además de KB)
+    },
+  },
+  equilibrado: {
+    label: "Equilibrado",
+    emoji: "🟡",
+    color: "bg-amber-600 hover:bg-amber-500",
+    description: "Veo Lite + SD 1.5 Pro",
+    mapping: {
+      4: "seedance-1-pro-fast",   // $0.025/s — no hay mejor a 4s
+      5: "veo-3.1-lite-generate-preview", // $0.05/s — Veo Lite
+      6: "seedance-1-pro-fast",   // $0.025/s — Veo no soporta 6s
+      8: "veo-3.1-lite-generate-preview", // $0.05/s — Veo Lite
+      10: "seedance-1.5-pro",     // $0.052/s — SD 1.5 Pro
+      12: "seedance-1.5-pro",     // $0.052/s
+      15: "seedance-2.0-fast",    // $0.15/s
+    },
+  },
+}
+
 // All possible durations across all models
 const ALL_DURATIONS = [4, 5, 6, 8, 10, 12, 15]
 
@@ -182,7 +218,7 @@ function SceneCard({
             ⏱ {scene.duration}s
           </span>
           {isVeo && <span className="text-[8px] text-purple-400">Gemini escribe prompt</span>}
-          {!isVeo && scene.model !== "ken-burns" && <span className="text-[8px] text-blue-400">GLM 5.2 escribe prompt</span>}
+          {!isVeo && scene.model !== "ken-burns" && <span className="text-[8px] text-blue-400">Gemini escribe prompt</span>}
         </div>
         <div className="text-[10px] text-[var(--text-tertiary)] line-clamp-2">
           {sceneData.text_excerpt || sceneData.image_prompt || "Sin descripción"}
@@ -197,7 +233,7 @@ function SceneCard({
         <textarea
           value={scene.motionPrompt}
           onChange={(e) => onChange({ motionPrompt: e.target.value })}
-          placeholder={scene.model === "ken-burns" ? "Ken Burns no necesita prompt" : isVeo ? "Gemini escribirá el prompt..." : "GLM 5.2 escribirá el prompt al auto-preparar..."}
+          placeholder={scene.model === "ken-burns" ? "Ken Burns no necesita prompt" : isVeo ? "Gemini escribirá el prompt..." : "Gemini escribirá el prompt al auto-preparar..."}
           rows={2}
           disabled={scene.status === "generating" || scene.status === "done" || scene.model === "ken-burns"}
           className="w-full mt-1 px-2 py-1.5 text-[11px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded-lg text-white placeholder:text-[var(--text-tertiary)] resize-none focus:border-indigo-500/50 focus:outline-none disabled:opacity-50"
@@ -263,6 +299,7 @@ export const ProductionPanel = memo(function ProductionPanel({
   const [scenes, setScenes] = useState<SceneState[]>([])
   const [globalModel, setGlobalModel] = useState("ken-burns")
   const [globalResolution, setGlobalResolution] = useState<Resolution>("720p")
+  const [activeTier, setActiveTier] = useState<TierName | "manual" | null>(null)
   const [isAutoPreparing, setIsAutoPreparing] = useState(false)
   const [isBatchGenerating, setIsBatchGenerating] = useState(false)
   const [statusMsg, setStatusMsg] = useState("")
@@ -335,13 +372,35 @@ export const ProductionPanel = memo(function ProductionPanel({
     }
   }, [globalModel, globalResolution, scenes])
 
+  // Apply tier preset — auto-assigns best model per scene duration
+  const applyTier = useCallback((tier: TierName) => {
+    const config = TIER_CONFIG[tier]
+    let updated = 0
+    setScenes((prev) =>
+      prev.map((s) => {
+        if (s.status === "done" || s.status === "generating") return s
+        const modelId = config.mapping[s.duration]
+        if (!modelId) return s
+        // Verify the model actually supports this duration
+        const model = MODEL_MAP[modelId]
+        if (!model || !model.durations.includes(s.duration)) return s
+        updated++
+        return { ...s, model: modelId, resolution: globalResolution }
+      })
+    )
+    setActiveTier(tier)
+    const tierLabel = config.emoji + " " + config.label
+    const totalScenes = scenes.filter((s) => s.status !== "done" && s.status !== "generating").length
+    setStatusMsg(`${tierLabel}: ${updated}/${totalScenes} escenas asignadas automáticamente`)
+  }, [globalResolution, scenes])
+
   const updateScene = useCallback((index: number, updates: Partial<SceneState>) => {
     setScenes((prev) =>
       prev.map((s) => (s.index === index ? { ...s, ...updates } : s))
     )
   }, [])
 
-  /* ── Auto-preparar: GLM 5.2 / Gemini writes motion prompts ── */
+  /* ── Auto-preparar: Gemini writes motion prompts ── */
   const handleAutoPrepare = useCallback(async () => {
     if (!chapterId) return
     setIsAutoPreparing(true)
@@ -544,13 +603,33 @@ export const ProductionPanel = memo(function ProductionPanel({
           </p>
         </div>
 
-        {/* Global: Model + Resolution (NO duration — it's per-scene from timeline) */}
-        <div className="flex items-center gap-3">
+        {/* Global: Tiers + Manual + Resolution */}
+        <div className="flex items-center gap-2">
+          {/* Tier Buttons */}
+          {(Object.entries(TIER_CONFIG) as [TierName, typeof TIER_CONFIG[TierName]][]).map(([key, cfg]) => (
+            <button
+              key={key}
+              onClick={() => applyTier(key)}
+              className={`px-3 py-1.5 text-[10px] font-medium text-white rounded-lg transition-all ${
+                activeTier === key
+                  ? cfg.color + " ring-1 ring-white/40"
+                  : "bg-[var(--surface-2)] hover:bg-[var(--surface-3)] border border-[var(--border-default)]"
+              }`}
+              title={cfg.description}
+            >
+              {cfg.emoji} {cfg.label}
+            </button>
+          ))}
+
+          {/* Separator */}
+          <div className="w-px h-6 bg-[var(--border-default)] mx-1" />
+
+          {/* Manual model selector */}
           <div className="flex flex-col">
-            <label className="text-[8px] text-[var(--text-tertiary)] uppercase mb-0.5">Modelo global</label>
+            <label className="text-[8px] text-[var(--text-tertiary)] uppercase mb-0.5">Manual</label>
             <select
               value={globalModel}
-              onChange={(e) => setGlobalModel(e.target.value)}
+              onChange={(e) => { setGlobalModel(e.target.value); setActiveTier("manual") }}
               className="px-2 py-1 text-[10px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded text-white"
             >
               {MODELS.map((m) => (
@@ -574,14 +653,14 @@ export const ProductionPanel = memo(function ProductionPanel({
           <button
             onClick={applyGlobalToAll}
             className="px-3 py-1.5 text-[10px] font-medium text-white bg-[var(--surface-2)] hover:bg-[var(--surface-3)] border border-[var(--border-default)] rounded-lg transition-colors mt-2.5"
-            title="Solo aplica a escenas cuya duración sea compatible con el modelo"
+            title="Aplica el modelo Manual seleccionado a escenas compatibles"
           >
-            Aplicar a compatibles
+            Aplicar Manual
           </button>
 
           <button
             onClick={onClose}
-            className="ml-4 px-3 py-1.5 text-[10px] font-medium text-[var(--text-tertiary)] hover:text-white border border-[var(--border-default)] hover:border-red-500 rounded-lg transition-colors mt-2.5"
+            className="ml-2 px-3 py-1.5 text-[10px] font-medium text-[var(--text-tertiary)] hover:text-white border border-[var(--border-default)] hover:border-red-500 rounded-lg transition-colors mt-2.5"
           >
             ✕ Cerrar
           </button>
@@ -597,6 +676,11 @@ export const ProductionPanel = memo(function ProductionPanel({
           {errorCount > 0 && <span className="text-red-400">❌ {errorCount} errores</span>}
           <span className="text-[var(--text-tertiary)]">⏸ {pendingCount} pendientes</span>
           <span className="text-white font-bold text-xs">Costo: ${totalCost.toFixed(2)}</span>
+          {activeTier && activeTier !== "manual" && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--surface-2)] border border-[var(--border-default)]">
+              {TIER_CONFIG[activeTier].emoji} {TIER_CONFIG[activeTier].label}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
