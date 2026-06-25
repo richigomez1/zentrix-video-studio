@@ -89,6 +89,30 @@ function getCompatibleModels(duration: number): ModelInfo[] {
   return MODELS.filter((m) => m.durations.includes(duration))
 }
 
+/* ── Ken Burns Config ── */
+interface KBConfig {
+  preset: string | null
+  start_zoom: number
+  end_zoom: number
+  start_x: number
+  start_y: number
+  end_x: number
+  end_y: number
+}
+
+const KB_DEFAULT: KBConfig = { preset: "zoom_in_center", start_zoom: 100, end_zoom: 125, start_x: 50, start_y: 50, end_x: 50, end_y: 50 }
+
+const KB_PRESETS: { id: string; label: string; emoji: string; config: Omit<KBConfig, "preset"> }[] = [
+  { id: "zoom_in_center",  label: "Zoom In",     emoji: "🔍", config: { start_zoom: 100, end_zoom: 125, start_x: 50, start_y: 50, end_x: 50, end_y: 50 } },
+  { id: "zoom_out_center", label: "Zoom Out",    emoji: "🔭", config: { start_zoom: 125, end_zoom: 100, start_x: 50, start_y: 50, end_x: 50, end_y: 50 } },
+  { id: "zoom_in_top",     label: "Zoom Arriba", emoji: "⬆️", config: { start_zoom: 100, end_zoom: 130, start_x: 50, start_y: 25, end_x: 50, end_y: 25 } },
+  { id: "zoom_in_bottom",  label: "Zoom Abajo",  emoji: "⬇️", config: { start_zoom: 100, end_zoom: 130, start_x: 50, start_y: 75, end_x: 50, end_y: 75 } },
+  { id: "pan_left",        label: "Pan →",       emoji: "➡️", config: { start_zoom: 120, end_zoom: 120, start_x: 20, start_y: 50, end_x: 80, end_y: 50 } },
+  { id: "pan_right",       label: "Pan ←",       emoji: "⬅️", config: { start_zoom: 120, end_zoom: 120, start_x: 80, start_y: 50, end_x: 20, end_y: 50 } },
+  { id: "pan_up",          label: "Pan ↑",       emoji: "⏫", config: { start_zoom: 120, end_zoom: 120, start_x: 50, start_y: 75, end_x: 50, end_y: 25 } },
+  { id: "pan_down",        label: "Pan ↓",       emoji: "⏬", config: { start_zoom: 120, end_zoom: 120, start_x: 50, start_y: 25, end_x: 50, end_y: 75 } },
+]
+
 /* ── Scene State ── */
 interface SceneState {
   index: number
@@ -97,6 +121,7 @@ interface SceneState {
   resolution: Resolution
   motionPrompt: string
   classification: string
+  kbConfig: KBConfig
   status: "pending" | "ready" | "generating" | "done" | "error"
   videoUrl: string | null
   errorMsg: string
@@ -223,19 +248,92 @@ function SceneCard({
         </div>
       </div>
 
-      {/* Motion Prompt */}
+      {/* Motion Prompt OR Ken Burns Config */}
       <div className="px-3 pb-2">
-        <label className="text-[9px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
-          Motion Prompt {hasPrompt ? "✅" : ""}
-        </label>
-        <textarea
-          value={scene.motionPrompt}
-          onChange={(e) => onChange({ motionPrompt: e.target.value })}
-          placeholder={scene.model === "ken-burns" ? "Ken Burns no necesita prompt" : isVeo ? "Gemini escribirá el prompt..." : "Gemini escribirá el prompt al auto-preparar..."}
-          rows={2}
-          disabled={scene.status === "generating" || scene.status === "done" || scene.model === "ken-burns"}
-          className="w-full mt-1 px-2 py-1.5 text-[11px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded-lg text-white placeholder:text-[var(--text-tertiary)] resize-none focus:border-indigo-500/50 focus:outline-none disabled:opacity-50"
-        />
+        {scene.model === "ken-burns" ? (
+          /* ── Ken Burns Config Panel ── */
+          <div>
+            <label className="text-[9px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
+              🎞 Efecto Ken Burns
+            </label>
+            {/* Preset buttons */}
+            <div className="grid grid-cols-4 gap-1 mt-1.5">
+              {KB_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => onChange({ kbConfig: { ...p.config, preset: p.id } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className={`px-1 py-1.5 text-[9px] rounded-md transition-all ${
+                    scene.kbConfig.preset === p.id
+                      ? "bg-emerald-600 text-white ring-1 ring-emerald-400"
+                      : "bg-[var(--surface-2)] text-[var(--text-tertiary)] hover:bg-[var(--surface-3)] hover:text-white"
+                  } disabled:opacity-50`}
+                  title={p.label}
+                >
+                  {p.emoji}
+                </button>
+              ))}
+            </div>
+            {/* Manual sliders */}
+            <div className="mt-2 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-[8px] text-[var(--text-tertiary)] w-14">Zoom Ini</span>
+                <input type="range" min={100} max={150} value={scene.kbConfig.start_zoom}
+                  onChange={(e) => onChange({ kbConfig: { ...scene.kbConfig, preset: null, start_zoom: +e.target.value } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className="flex-1 h-1 accent-emerald-500" />
+                <span className="text-[9px] text-white w-8 text-right">{scene.kbConfig.start_zoom}%</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[8px] text-[var(--text-tertiary)] w-14">Zoom Fin</span>
+                <input type="range" min={100} max={150} value={scene.kbConfig.end_zoom}
+                  onChange={(e) => onChange({ kbConfig: { ...scene.kbConfig, preset: null, end_zoom: +e.target.value } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className="flex-1 h-1 accent-emerald-500" />
+                <span className="text-[9px] text-white w-8 text-right">{scene.kbConfig.end_zoom}%</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[8px] text-[var(--text-tertiary)] w-14">Pos X</span>
+                <input type="range" min={0} max={100} value={scene.kbConfig.start_x}
+                  onChange={(e) => onChange({ kbConfig: { ...scene.kbConfig, preset: null, start_x: +e.target.value } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className="flex-1 h-1 accent-blue-500" />
+                <span className="text-[8px] text-[var(--text-tertiary)]">→</span>
+                <input type="range" min={0} max={100} value={scene.kbConfig.end_x}
+                  onChange={(e) => onChange({ kbConfig: { ...scene.kbConfig, preset: null, end_x: +e.target.value } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className="flex-1 h-1 accent-blue-500" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[8px] text-[var(--text-tertiary)] w-14">Pos Y</span>
+                <input type="range" min={0} max={100} value={scene.kbConfig.start_y}
+                  onChange={(e) => onChange({ kbConfig: { ...scene.kbConfig, preset: null, start_y: +e.target.value } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className="flex-1 h-1 accent-blue-500" />
+                <span className="text-[8px] text-[var(--text-tertiary)]">→</span>
+                <input type="range" min={0} max={100} value={scene.kbConfig.end_y}
+                  onChange={(e) => onChange({ kbConfig: { ...scene.kbConfig, preset: null, end_y: +e.target.value } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className="flex-1 h-1 accent-blue-500" />
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* ── Regular Motion Prompt ── */
+          <div>
+            <label className="text-[9px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
+              Motion Prompt {hasPrompt ? "✅" : ""}
+            </label>
+            <textarea
+              value={scene.motionPrompt}
+              onChange={(e) => onChange({ motionPrompt: e.target.value })}
+              placeholder={isVeo ? "Gemini escribirá el prompt..." : "Gemini escribirá el prompt al auto-preparar..."}
+              rows={2}
+              disabled={scene.status === "generating" || scene.status === "done"}
+              className="w-full mt-1 px-2 py-1.5 text-[11px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded-lg text-white placeholder:text-[var(--text-tertiary)] resize-none focus:border-indigo-500/50 focus:outline-none disabled:opacity-50"
+            />
+          </div>
+        )}
       </div>
 
       {/* Controls: Model + Resolution (NO duration — it's fixed) */}
@@ -331,6 +429,7 @@ export const ProductionPanel = memo(function ProductionPanel({
           resolution: "720p" as Resolution,
           motionPrompt: "",
           classification: "",
+          kbConfig: { ...KB_DEFAULT },
           status: s.video_url ? "done" as const : "pending" as const,
           videoUrl: s.video_url || null,
           errorMsg: "",
@@ -458,6 +557,9 @@ export const ProductionPanel = memo(function ProductionPanel({
     updateScene(sceneIndex, { status: "generating", errorMsg: "" })
 
     try {
+      const motionPromptToSend = scene.model === "ken-burns"
+        ? JSON.stringify(scene.kbConfig)
+        : scene.motionPrompt
       await apiFetch(`/api/image-studio/chapters/${chapterId}/animate-scene`, {
         method: "POST",
         body: JSON.stringify({
@@ -465,7 +567,7 @@ export const ProductionPanel = memo(function ProductionPanel({
           video_model: scene.model,
           duration_seconds: scene.duration,
           resolution: scene.resolution,
-          motion_prompt: scene.motionPrompt,
+          motion_prompt: motionPromptToSend,
         }),
       })
       startPolling()
@@ -501,6 +603,9 @@ export const ProductionPanel = memo(function ProductionPanel({
     let sent = 0
     for (const scene of pendingScenes) {
       try {
+        const motionPromptToSend = scene.model === "ken-burns"
+          ? JSON.stringify(scene.kbConfig)
+          : scene.motionPrompt
         await apiFetch(`/api/image-studio/chapters/${chapterId}/animate-scene`, {
           method: "POST",
           body: JSON.stringify({
@@ -508,7 +613,7 @@ export const ProductionPanel = memo(function ProductionPanel({
             video_model: scene.model,
             duration_seconds: scene.duration,
             resolution: scene.resolution,
-            motion_prompt: scene.motionPrompt,
+            motion_prompt: motionPromptToSend,
           }),
         })
         sent++
