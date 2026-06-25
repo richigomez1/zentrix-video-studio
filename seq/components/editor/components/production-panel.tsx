@@ -225,15 +225,25 @@ function SceneCard({
         {/* Video preview or status */}
         <div className="w-28 h-20 rounded-lg overflow-hidden bg-[var(--surface-2)] flex-shrink-0 flex items-center justify-center">
           {scene.status === "done" && scene.videoUrl ? (
-            <video
-              src={scene.videoUrl}
-              className="w-full h-full object-cover"
-              muted
-              loop
-              playsInline
-              onMouseEnter={(e) => (e.target as HTMLVideoElement).play()}
-              onMouseLeave={(e) => { const v = e.target as HTMLVideoElement; v.pause(); v.currentTime = 0 }}
-            />
+            <div className="relative w-full h-full group">
+              <video
+                src={scene.videoUrl}
+                className="w-full h-full object-cover"
+                muted
+                loop
+                playsInline
+                onMouseEnter={(e) => (e.target as HTMLVideoElement).play()}
+                onMouseLeave={(e) => { const v = e.target as HTMLVideoElement; v.pause(); v.currentTime = 0 }}
+              />
+              <div
+                className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                onClick={() => window.open(scene.videoUrl!, '_blank')}
+              >
+                <span className="hidden group-hover:block text-white text-[10px] font-bold bg-black/60 px-2 py-1 rounded">
+                  ▶ Ver / Descargar
+                </span>
+              </div>
+            </div>
           ) : scene.status === "generating" ? (
             <div className="text-center">
               <div className="text-lg animate-spin">⏳</div>
