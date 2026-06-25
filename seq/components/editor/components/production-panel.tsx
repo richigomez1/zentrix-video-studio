@@ -136,13 +136,11 @@ export interface ProductionPanelProps {
 function SceneCard({
   scene,
   sceneData,
-  compatibleModels,
   onChange,
   onGenerate,
 }: {
   scene: SceneState
   sceneData: ZentrixScene
-  compatibleModels: ModelInfo[]
   onChange: (updates: Partial<SceneState>) => void
   onGenerate: () => void
 }) {
@@ -248,9 +246,14 @@ function SceneCard({
           disabled={scene.status === "generating" || scene.status === "done"}
           className="flex-1 px-1.5 py-1 text-[10px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded text-white disabled:opacity-50"
         >
-          {compatibleModels.map((m) => (
-            <option key={m.id} value={m.id}>{m.emoji} {m.name} ({m.tier})</option>
-          ))}
+          {MODELS.map((m) => {
+            const isCompatible = m.id === "ken-burns" || m.durations.includes(scene.duration)
+            return (
+              <option key={m.id} value={m.id}>
+                {m.emoji} {m.name} ({m.tier}){!isCompatible ? " ⚠️" : ""}
+              </option>
+            )
+          })}
         </select>
 
         <select
@@ -723,13 +726,11 @@ export const ProductionPanel = memo(function ProductionPanel({
           {scenes.map((scene) => {
             const sceneData = chapterData.scenes.find((s) => s.index === scene.index)
             if (!sceneData) return null
-            const compatibleModels = getCompatibleModels(scene.duration)
             return (
               <SceneCard
                 key={scene.index}
                 scene={scene}
                 sceneData={sceneData}
-                compatibleModels={compatibleModels}
                 onChange={(updates) => updateScene(scene.index, updates)}
                 onGenerate={() => generateScene(scene.index)}
               />
