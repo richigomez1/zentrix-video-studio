@@ -560,36 +560,89 @@ export const ProductionPanel = memo(function ProductionPanel({
     setStatusMsg(`🎞 Ken Burns "${label}" aplicado a ${count} escenas`)
   }, [])
 
-  // Initialize scenes — duration is FIXED from timeline
+  // ── Scene State Persistence (localStorage per chapter) ──
+  const SCENE_STORAGE_KEY = chapterId ? `zentrix_prod_scenes_${chapterId}` : ""
+
+  const saveScenesToStorage = useCallback((scenesToSave: SceneState[]) => {
+    if (!SCENE_STORAGE_KEY) return
+    try {
+      const toSave = scenesToSave.map((s) => ({
+        index: s.index, model: s.model, resolution: s.resolution,
+        motionPrompt: s.motionPrompt, classification: s.classification,
+        kbConfig: s.kbConfig, status: s.status, videoUrl: s.videoUrl,
+      }))
+      localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(toSave))
+    } catch {}
+  }, [SCENE_STORAGE_KEY])
+
+  // Initialize scenes — duration FIXED from timeline + restore saved state
   useEffect(() => {
     if (!chapterData) return
+
+    // Load saved state from localStorage
+    let savedMap: Record<number, any> = {}
+    try {
+      const raw = SCENE_STORAGE_KEY ? localStorage.getItem(SCENE_STORAGE_KEY) : null
+      if (raw) {
+        const arr = JSON.parse(raw)
+        savedMap = Object.fromEntries(arr.map((s: any) => [s.index, s]))
+      }
+    } catch {}
+
     const initial: SceneState[] = chapterData.scenes
       .filter((s) => s.image_url)
       .map((s) => {
-        // Duration comes from Gemini's audio timing — this is THE duration
         const rawDuration = (s.end_time !== null && s.start_time !== null)
           ? Math.round(s.end_time - s.start_time)
           : 8
         const duration = snapToStandardDuration(rawDuration)
-        // Default to first compatible model (Ken Burns always fits)
         const compatible = getCompatibleModels(duration)
         const defaultModel = compatible.find((m) => m.id === "ken-burns") ? "ken-burns" : compatible[0]?.id || "ken-burns"
 
+        // Restore saved config if available
+        const saved = savedMap[s.index]
+
         return {
           index: s.index,
-          model: s.video_url ? (s.video_model || defaultModel) : defaultModel,
-          duration, // FIXED — never changes
-          resolution: "720p" as Resolution,
-          motionPrompt: "",
-          classification: "",
-          kbConfig: { ...KB_DEFAULT },
-          status: s.video_url ? "done" as const : "pending" as const,
-          videoUrl: s.video_url || null,
+          model: saved?.model || (s.video_url ? (s.video_model || defaultModel) : defaultModel),
+          duration,
+          resolution: (saved?.resolution || "720p") as Resolution,
+          motionPrompt: saved?.motionPrompt || "",
+          classification: saved?.classification || "",
+          kbConfig: saved?.kbConfig || { ...KB_DEFAULT },
+          status: s.video_url ? "done" as const : (saved?.status === "done" && saved?.videoUrl) ? "done" as const : "pending" as const,
+          videoUrl: s.video_url || saved?.videoUrl || null,
           errorMsg: "",
         }
       })
     setScenes(initial)
-  }, [chapterData])
+
+    // Fetch video-progress to detect completed videos not in chapterData
+    if (chapterId) {
+      apiFetch(`/api/image-studio/chapters/${chapterId}/video-progress`).then((data) => {
+        if (!data.videos || !mountedRef.current) return
+        setScenes((prev) => {
+          let changed = false
+          const updated = prev.map((s) => {
+            if (s.status === "done" && s.videoUrl) return s
+            const vid = data.videos.find((v: any) => v.segment_index === s.index)
+            if (!vid) return s
+            const isKB = s.model === "ken-burns"
+            const status = isKB ? vid.kb_status : vid.veo_status
+            const url = isKB ? vid.kb_url : vid.veo_url
+            if (status === "done" && url) {
+              changed = true
+              onVideoGenerated(s.index, url)
+              return { ...s, status: "done" as const, videoUrl: url }
+            }
+            return s
+          })
+          if (changed) saveScenesToStorage(updated)
+          return changed ? updated : prev
+        })
+      }).catch(() => {})
+    }
+  }, [chapterData, chapterId])
 
   useEffect(() => {
     mountedRef.current = true
@@ -598,6 +651,11 @@ export const ProductionPanel = memo(function ProductionPanel({
       if (pollingRef.current) clearInterval(pollingRef.current)
     }
   }, [])
+
+  // Auto-save scene state to localStorage on every change
+  useEffect(() => {
+    if (scenes.length > 0) saveScenesToStorage(scenes)
+  }, [scenes, saveScenesToStorage])
 
   // Apply global model + resolution to compatible scenes only
   const applyGlobalToAll = useCallback(() => {
