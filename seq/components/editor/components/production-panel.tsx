@@ -91,6 +91,7 @@ function getCompatibleModels(duration: number): ModelInfo[] {
 
 /* ── Ken Burns Config ── */
 interface KBConfig {
+  mode: "standard" | "parallax"
   preset: string | null
   start_zoom: number
   end_zoom: number
@@ -98,9 +99,19 @@ interface KBConfig {
   start_y: number
   end_x: number
   end_y: number
+  overlay: "none" | "dust" | "fog" | "rain" | "grain" | "ash"
 }
 
-const KB_DEFAULT: KBConfig = { preset: "zoom_in_center", start_zoom: 100, end_zoom: 125, start_x: 50, start_y: 50, end_x: 50, end_y: 50 }
+const KB_DEFAULT: KBConfig = { mode: "standard", preset: "zoom_in_center", start_zoom: 100, end_zoom: 125, start_x: 50, start_y: 50, end_x: 50, end_y: 50, overlay: "none" }
+
+const KB_OVERLAYS: { id: KBConfig["overlay"]; label: string; emoji: string }[] = [
+  { id: "none",  label: "Sin overlay",  emoji: "⚪" },
+  { id: "dust",  label: "Polvo",        emoji: "✨" },
+  { id: "fog",   label: "Niebla",       emoji: "🌫" },
+  { id: "rain",  label: "Lluvia",       emoji: "🌧" },
+  { id: "grain", label: "Grano",        emoji: "🎞" },
+  { id: "ash",   label: "Ceniza",       emoji: "🔥" },
+]
 
 const KB_PRESETS: { id: string; label: string; emoji: string; config: Omit<KBConfig, "preset"> }[] = [
   { id: "zoom_in_center",  label: "Zoom In",     emoji: "🔍", config: { start_zoom: 100, end_zoom: 125, start_x: 50, start_y: 50, end_x: 50, end_y: 50 } },
@@ -264,6 +275,51 @@ function SceneCard({
             <label className="text-[9px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
               🎞 Efecto Ken Burns
             </label>
+
+            {/* Mode toggle: Standard vs Parallax */}
+            <div className="flex gap-1 mt-1.5">
+              <button
+                onClick={() => onChange({ kbConfig: { ...scene.kbConfig, mode: "standard" } })}
+                disabled={scene.status === "generating" || scene.status === "done"}
+                className={`flex-1 px-2 py-1 text-[9px] rounded-md transition-all ${
+                  scene.kbConfig.mode === "standard"
+                    ? "bg-emerald-600 text-white"
+                    : "bg-[var(--surface-2)] text-[var(--text-tertiary)] hover:text-white"
+                } disabled:opacity-50`}
+              >
+                🎬 Estándar
+              </button>
+              <button
+                onClick={() => onChange({ kbConfig: { ...scene.kbConfig, mode: "parallax" } })}
+                disabled={scene.status === "generating" || scene.status === "done"}
+                className={`flex-1 px-2 py-1 text-[9px] rounded-md transition-all ${
+                  scene.kbConfig.mode === "parallax"
+                    ? "bg-purple-600 text-white"
+                    : "bg-[var(--surface-2)] text-[var(--text-tertiary)] hover:text-white"
+                } disabled:opacity-50`}
+              >
+                🌄 Paralaje 3D
+              </button>
+            </div>
+
+            {/* Overlay selector */}
+            <div className="flex gap-1 mt-1.5 flex-wrap">
+              {KB_OVERLAYS.map((ov) => (
+                <button
+                  key={ov.id}
+                  onClick={() => onChange({ kbConfig: { ...scene.kbConfig, overlay: ov.id } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className={`px-1.5 py-1 text-[8px] rounded-md transition-all ${
+                    scene.kbConfig.overlay === ov.id
+                      ? "bg-cyan-600 text-white ring-1 ring-cyan-400"
+                      : "bg-[var(--surface-2)] text-[var(--text-tertiary)] hover:text-white"
+                  } disabled:opacity-50`}
+                  title={ov.label}
+                >
+                  {ov.emoji} {ov.label}
+                </button>
+              ))}
+            </div>
 
             {/* Saved presets (user's custom) */}
             {savedKBPresets.length > 0 && (
