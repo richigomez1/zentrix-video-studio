@@ -178,6 +178,7 @@ function SceneCard({
   onApplyKBToAll,
   onChange,
   onGenerate,
+  onDelete,
 }: {
   scene: SceneState
   sceneData: ZentrixScene
@@ -187,6 +188,7 @@ function SceneCard({
   onApplyKBToAll: (config: KBConfig) => void
   onChange: (updates: Partial<SceneState>) => void
   onGenerate: () => void
+  onDelete: () => void
 }) {
   const cost = getPrice(scene.model, scene.duration, scene.resolution)
   const hasPrompt = scene.motionPrompt.trim().length > 0
@@ -235,13 +237,19 @@ function SceneCard({
                 onMouseEnter={(e) => (e.target as HTMLVideoElement).play()}
                 onMouseLeave={(e) => { const v = e.target as HTMLVideoElement; v.pause(); v.currentTime = 0 }}
               />
-              <div
-                className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                onClick={() => window.open(scene.videoUrl!, '_blank')}
-              >
-                <span className="hidden group-hover:block text-white text-[10px] font-bold bg-black/60 px-2 py-1 rounded">
-                  ▶ Ver / Descargar
-                </span>
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center gap-2">
+                <button
+                  className="hidden group-hover:block text-white text-[10px] font-bold bg-black/60 px-2 py-1 rounded cursor-pointer hover:bg-black/80"
+                  onClick={() => window.open(scene.videoUrl!, '_blank')}
+                >
+                  ▶ Ver
+                </button>
+                <button
+                  className="hidden group-hover:block text-white text-[10px] font-bold bg-red-600/80 px-2 py-1 rounded cursor-pointer hover:bg-red-500"
+                  onClick={() => onDelete()}
+                >
+                  🗑
+                </button>
               </div>
             </div>
           ) : scene.status === "generating" ? (
@@ -769,6 +777,20 @@ export const ProductionPanel = memo(function ProductionPanel({
     }
   }, [chapterId, globalResolution])
 
+  /* ── Delete video from scene ── */
+  const deleteSceneVideo = useCallback(async (sceneIndex: number) => {
+    if (!chapterId) return
+    try {
+      await apiFetch(`/api/image-studio/chapters/${chapterId}/video/${sceneIndex}`, {
+        method: "DELETE",
+      })
+      updateScene(sceneIndex, { status: "pending", videoUrl: null, errorMsg: "" })
+      setStatusMsg(`🗑 Video de escena ${sceneIndex + 1} eliminado`)
+    } catch (e: unknown) {
+      setStatusMsg(`❌ Error al borrar: ${e instanceof Error ? e.message : "Error"}`)
+    }
+  }, [chapterId, updateScene])
+
   /* ── Generate single scene ── */
   const generateScene = useCallback(async (sceneIndex: number) => {
     if (!chapterId) return
@@ -1014,6 +1036,39 @@ export const ProductionPanel = memo(function ProductionPanel({
 
         <div className="flex items-center gap-2">
           <button
+            onClick={async () => {
+              if (!chapterId) return
+              setStatusMsg("🔄 Actualizando...")
+              try {
+                const data = await apiFetch(`/api/image-studio/chapters/${chapterId}/video-progress`)
+                if (!data.videos) return
+                let updated = 0
+                setScenes((prev) =>
+                  prev.map((s) => {
+                    const vid = data.videos.find((v: any) => v.segment_index === s.index)
+                    if (!vid) return s
+                    const url = vid.kb_url || vid.veo_url
+                    const status = vid.kb_status !== "none" ? vid.kb_status : vid.veo_status
+                    if (status === "done" && url && s.status !== "done") {
+                      updated++
+                      onVideoGenerated(s.index, url)
+                      return { ...s, status: "done" as const, videoUrl: url }
+                    }
+                    if (status === "error" && s.status === "generating") {
+                      return { ...s, status: "error" as const, errorMsg: vid.veo_error || "Error" }
+                    }
+                    return s
+                  })
+                )
+                setStatusMsg(`🔄 ${updated} videos nuevos detectados`)
+              } catch { setStatusMsg("❌ Error al actualizar") }
+            }}
+            className="px-3 py-2 text-xs font-medium text-white bg-cyan-600 hover:bg-cyan-500 rounded-lg transition-colors flex items-center gap-1"
+          >
+            🔄 Actualizar
+          </button>
+
+          <button
             onClick={handleAutoPrepare}
             disabled={isAutoPreparing || isBatchGenerating}
             className="px-4 py-2 text-xs font-medium text-white bg-purple-600 hover:bg-purple-500 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-2"
@@ -1063,6 +1118,7 @@ export const ProductionPanel = memo(function ProductionPanel({
                 onApplyKBToAll={applyKBToAll}
                 onChange={(updates) => updateScene(scene.index, updates)}
                 onGenerate={() => generateScene(scene.index)}
+                onDelete={() => deleteSceneVideo(scene.index)}
               />
             )
           })}
