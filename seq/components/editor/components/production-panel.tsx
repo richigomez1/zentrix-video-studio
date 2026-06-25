@@ -102,7 +102,7 @@ interface KBConfig {
   overlay: "none" | "dust" | "fog" | "rain" | "grain" | "ash"
 }
 
-const KB_DEFAULT: KBConfig = { mode: "standard", preset: "zoom_in_center", start_zoom: 100, end_zoom: 125, start_x: 50, start_y: 50, end_x: 50, end_y: 50, overlay: "none" }
+const KB_DEFAULT: KBConfig = { mode: "standard", preset: "zoom_in_center", start_zoom: 100, end_zoom: 110, start_x: 50, start_y: 50, end_x: 50, end_y: 50, overlay: "none" }
 
 const KB_OVERLAYS: { id: KBConfig["overlay"]; label: string; emoji: string }[] = [
   { id: "none",  label: "Sin overlay",  emoji: "⚪" },
@@ -114,14 +114,14 @@ const KB_OVERLAYS: { id: KBConfig["overlay"]; label: string; emoji: string }[] =
 ]
 
 const KB_PRESETS: { id: string; label: string; emoji: string; config: Omit<KBConfig, "preset"> }[] = [
-  { id: "zoom_in_center",  label: "Zoom In",     emoji: "🔍", config: { start_zoom: 100, end_zoom: 125, start_x: 50, start_y: 50, end_x: 50, end_y: 50 } },
-  { id: "zoom_out_center", label: "Zoom Out",    emoji: "🔭", config: { start_zoom: 125, end_zoom: 100, start_x: 50, start_y: 50, end_x: 50, end_y: 50 } },
-  { id: "zoom_in_top",     label: "Zoom Arriba", emoji: "⬆️", config: { start_zoom: 100, end_zoom: 130, start_x: 50, start_y: 25, end_x: 50, end_y: 25 } },
-  { id: "zoom_in_bottom",  label: "Zoom Abajo",  emoji: "⬇️", config: { start_zoom: 100, end_zoom: 130, start_x: 50, start_y: 75, end_x: 50, end_y: 75 } },
-  { id: "pan_left",        label: "Pan →",       emoji: "➡️", config: { start_zoom: 120, end_zoom: 120, start_x: 20, start_y: 50, end_x: 80, end_y: 50 } },
-  { id: "pan_right",       label: "Pan ←",       emoji: "⬅️", config: { start_zoom: 120, end_zoom: 120, start_x: 80, start_y: 50, end_x: 20, end_y: 50 } },
-  { id: "pan_up",          label: "Pan ↑",       emoji: "⏫", config: { start_zoom: 120, end_zoom: 120, start_x: 50, start_y: 75, end_x: 50, end_y: 25 } },
-  { id: "pan_down",        label: "Pan ↓",       emoji: "⏬", config: { start_zoom: 120, end_zoom: 120, start_x: 50, start_y: 25, end_x: 50, end_y: 75 } },
+  { id: "zoom_in_center",  label: "Zoom In",     emoji: "🔍", config: { mode: "standard", start_zoom: 100, end_zoom: 110, start_x: 50, start_y: 50, end_x: 50, end_y: 50, overlay: "none" } },
+  { id: "zoom_out_center", label: "Zoom Out",    emoji: "🔭", config: { mode: "standard", start_zoom: 112, end_zoom: 100, start_x: 50, start_y: 50, end_x: 50, end_y: 50, overlay: "none" } },
+  { id: "zoom_in_top",     label: "Zoom Arriba", emoji: "⬆️", config: { mode: "standard", start_zoom: 100, end_zoom: 115, start_x: 50, start_y: 25, end_x: 50, end_y: 25, overlay: "none" } },
+  { id: "zoom_in_bottom",  label: "Zoom Abajo",  emoji: "⬇️", config: { mode: "standard", start_zoom: 100, end_zoom: 115, start_x: 50, start_y: 75, end_x: 50, end_y: 75, overlay: "none" } },
+  { id: "pan_left",        label: "Pan →",       emoji: "➡️", config: { mode: "standard", start_zoom: 112, end_zoom: 112, start_x: 20, start_y: 50, end_x: 80, end_y: 50, overlay: "none" } },
+  { id: "pan_right",       label: "Pan ←",       emoji: "⬅️", config: { mode: "standard", start_zoom: 112, end_zoom: 112, start_x: 80, start_y: 50, end_x: 20, end_y: 50, overlay: "none" } },
+  { id: "pan_up",          label: "Pan ↑",       emoji: "⏫", config: { mode: "standard", start_zoom: 112, end_zoom: 112, start_x: 50, start_y: 75, end_x: 50, end_y: 25, overlay: "none" } },
+  { id: "pan_down",        label: "Pan ↓",       emoji: "⏬", config: { mode: "standard", start_zoom: 112, end_zoom: 112, start_x: 50, start_y: 25, end_x: 50, end_y: 75, overlay: "none" } },
 ]
 
 /* ── Scene State ── */
