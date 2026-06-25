@@ -161,11 +161,19 @@ export interface ProductionPanelProps {
 function SceneCard({
   scene,
   sceneData,
+  savedKBPresets,
+  onSaveKBPreset,
+  onDeleteKBPreset,
+  onApplyKBToAll,
   onChange,
   onGenerate,
 }: {
   scene: SceneState
   sceneData: ZentrixScene
+  savedKBPresets: { name: string; config: KBConfig }[]
+  onSaveKBPreset: (name: string, config: KBConfig) => void
+  onDeleteKBPreset: (name: string) => void
+  onApplyKBToAll: (config: KBConfig) => void
   onChange: (updates: Partial<SceneState>) => void
   onGenerate: () => void
 }) {
@@ -256,7 +264,35 @@ function SceneCard({
             <label className="text-[9px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
               🎞 Efecto Ken Burns
             </label>
-            {/* Preset buttons */}
+
+            {/* Saved presets (user's custom) */}
+            {savedKBPresets.length > 0 && (
+              <div className="mt-1.5 mb-1">
+                <div className="text-[8px] text-amber-400 mb-1">💾 Mis presets:</div>
+                <div className="flex flex-wrap gap-1">
+                  {savedKBPresets.map((p) => (
+                    <button
+                      key={p.name}
+                      onClick={() => onChange({ kbConfig: { ...p.config } })}
+                      className={`group px-2 py-1 text-[9px] rounded-md transition-all relative ${
+                        scene.kbConfig.preset === p.name
+                          ? "bg-amber-600 text-white ring-1 ring-amber-400"
+                          : "bg-[var(--surface-2)] text-[var(--text-tertiary)] hover:bg-[var(--surface-3)] hover:text-white"
+                      }`}
+                      title={`Zoom ${p.config.start_zoom}→${p.config.end_zoom}%`}
+                    >
+                      {p.name}
+                      <span
+                        onClick={(e) => { e.stopPropagation(); onDeleteKBPreset(p.name) }}
+                        className="hidden group-hover:inline ml-1 text-red-400 hover:text-red-300 cursor-pointer"
+                      >✕</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Built-in preset buttons */}
             <div className="grid grid-cols-4 gap-1 mt-1.5">
               {KB_PRESETS.map((p) => (
                 <button
@@ -316,6 +352,27 @@ function SceneCard({
                   disabled={scene.status === "generating" || scene.status === "done"}
                   className="flex-1 h-1 accent-blue-500" />
               </div>
+            </div>
+
+            {/* Save & Apply buttons */}
+            <div className="flex gap-1.5 mt-2">
+              <button
+                onClick={() => {
+                  const name = prompt("Nombre del preset:")
+                  if (name && name.trim()) onSaveKBPreset(name.trim(), scene.kbConfig)
+                }}
+                disabled={scene.status === "generating" || scene.status === "done"}
+                className="flex-1 px-2 py-1.5 text-[9px] font-medium text-amber-300 bg-amber-600/20 hover:bg-amber-600/40 border border-amber-600/40 rounded-md transition-colors disabled:opacity-50"
+              >
+                💾 Guardar preset
+              </button>
+              <button
+                onClick={() => onApplyKBToAll(scene.kbConfig)}
+                disabled={scene.status === "generating" || scene.status === "done"}
+                className="flex-1 px-2 py-1.5 text-[9px] font-medium text-emerald-300 bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-600/40 rounded-md transition-colors disabled:opacity-50"
+              >
+                📋 Aplicar a todos
+              </button>
             </div>
           </div>
         ) : (
@@ -406,6 +463,46 @@ export const ProductionPanel = memo(function ProductionPanel({
   const [statusMsg, setStatusMsg] = useState("")
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
   const mountedRef = useRef(true)
+
+  // ── Saved Ken Burns Presets (localStorage) ──
+  const KB_STORAGE_KEY = "zentrix_kb_presets"
+  const [savedKBPresets, setSavedKBPresets] = useState<{ name: string; config: KBConfig }[]>(() => {
+    try {
+      const raw = typeof window !== "undefined" ? localStorage.getItem(KB_STORAGE_KEY) : null
+      return raw ? JSON.parse(raw) : []
+    } catch { return [] }
+  })
+
+  const saveKBPreset = useCallback((name: string, config: KBConfig) => {
+    setSavedKBPresets((prev) => {
+      const updated = [...prev.filter((p) => p.name !== name), { name, config: { ...config, preset: name } }]
+      localStorage.setItem(KB_STORAGE_KEY, JSON.stringify(updated))
+      setStatusMsg(`💾 Preset "${name}" guardado`)
+      return updated
+    })
+  }, [])
+
+  const deleteKBPreset = useCallback((name: string) => {
+    setSavedKBPresets((prev) => {
+      const updated = prev.filter((p) => p.name !== name)
+      localStorage.setItem(KB_STORAGE_KEY, JSON.stringify(updated))
+      setStatusMsg(`🗑 Preset "${name}" eliminado`)
+      return updated
+    })
+  }, [])
+
+  const applyKBToAll = useCallback((config: KBConfig) => {
+    let count = 0
+    setScenes((prev) =>
+      prev.map((s) => {
+        if (s.model !== "ken-burns" || s.status === "done" || s.status === "generating") return s
+        count++
+        return { ...s, kbConfig: { ...config } }
+      })
+    )
+    const label = config.preset || "manual"
+    setStatusMsg(`🎞 Ken Burns "${label}" aplicado a ${count} escenas`)
+  }, [])
 
   // Initialize scenes — duration is FIXED from timeline
   useEffect(() => {
@@ -836,6 +933,10 @@ export const ProductionPanel = memo(function ProductionPanel({
                 key={scene.index}
                 scene={scene}
                 sceneData={sceneData}
+                savedKBPresets={savedKBPresets}
+                onSaveKBPreset={saveKBPreset}
+                onDeleteKBPreset={deleteKBPreset}
+                onApplyKBToAll={applyKBToAll}
                 onChange={(updates) => updateScene(scene.index, updates)}
                 onGenerate={() => generateScene(scene.index)}
               />
