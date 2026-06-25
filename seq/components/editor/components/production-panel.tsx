@@ -534,6 +534,8 @@ export const ProductionPanel = memo(function ProductionPanel({
   const [activeTier, setActiveTier] = useState<TierName | "manual" | null>(null)
   const [isAutoPreparing, setIsAutoPreparing] = useState(false)
   const [isBatchGenerating, setIsBatchGenerating] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [exportUrl, setExportUrl] = useState<string | null>(null)
   const [statusMsg, setStatusMsg] = useState("")
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
   const mountedRef = useRef(true)
@@ -879,6 +881,48 @@ export const ProductionPanel = memo(function ProductionPanel({
     }
   }, [chapterId, scenes, updateScene])
 
+  /* ── Export Chapter ── */
+  const handleExport = useCallback(async () => {
+    if (!chapterId || isExporting) return
+    setIsExporting(true)
+    setExportUrl(null)
+    setStatusMsg("📦 Iniciando exportación del capítulo completo...")
+
+    try {
+      const result = await apiFetch(`/api/image-studio/chapters/${chapterId}/export-chapter`, {
+        method: "POST",
+        body: JSON.stringify({ include_audio: true }),
+      })
+      const jobId = result.export_job_id
+      setStatusMsg("📦 Exportando... El worker está concatenando todos los clips + audio.")
+
+      // Poll export status
+      const pollExport = setInterval(async () => {
+        try {
+          const status = await apiFetch(`/api/image-studio/chapters/${chapterId}/export-status/${jobId}`)
+          if (status.status === "done" && status.download_url) {
+            clearInterval(pollExport)
+            setExportUrl(status.download_url)
+            setIsExporting(false)
+            setStatusMsg("✅ ¡Exportación completa! Click en 'Descargar' para obtener el video.")
+          } else if (status.status === "error") {
+            clearInterval(pollExport)
+            setIsExporting(false)
+            setStatusMsg(`❌ Error de exportación: ${status.error || "Error desconocido"}`)
+          } else {
+            setStatusMsg(`📦 Exportando... (${status.status})`)
+          }
+        } catch {
+          // Silent poll error
+        }
+      }, 10000) // Poll every 10 seconds
+
+    } catch (e: unknown) {
+      setIsExporting(false)
+      setStatusMsg(`❌ Error: ${e instanceof Error ? e.message : "Error"}`)
+    }
+  }, [chapterId, isExporting])
+
   /* ── Polling ── */
   const startPolling = useCallback(() => {
     if (pollingRef.current || !chapterId) return
@@ -1091,6 +1135,29 @@ export const ProductionPanel = memo(function ProductionPanel({
               <>🚀 Generar {readyToGenerate > 0 ? `${readyToGenerate} escenas` : "Todos"} (${totalCost.toFixed(2)})</>
             )}
           </button>
+
+          <button
+            onClick={handleExport}
+            disabled={isExporting || doneCount === 0}
+            className="px-4 py-2 text-xs font-medium text-white bg-green-600 hover:bg-green-500 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-2"
+          >
+            {isExporting ? (
+              <><span className="animate-spin">📦</span> Exportando...</>
+            ) : (
+              <>📦 Exportar Capítulo</>
+            )}
+          </button>
+
+          {exportUrl && (
+            <a
+              href={exportUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-400 rounded-lg transition-colors flex items-center gap-2 animate-pulse"
+            >
+              ⬇️ Descargar Video
+            </a>
+          )}
         </div>
       </div>
 
