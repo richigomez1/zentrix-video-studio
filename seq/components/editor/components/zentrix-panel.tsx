@@ -295,12 +295,18 @@ function LoadedInfo({
   onLoadAnother,
   onClear,
   onOpenProduction,
+  onRefreshVideos,
+  onDeleteAllVideos,
+  isRefreshing,
 }: {
   data: ZentrixEditorData
   hasTiming: boolean
   onLoadAnother: () => void
   onClear: () => void
   onOpenProduction?: () => void
+  onRefreshVideos?: () => void
+  onDeleteAllVideos?: () => void
+  isRefreshing?: boolean
 }) {
   const videoCount = data.scenes.filter((s) => s.video_url).length
   const imageCount = data.scenes.filter((s) => s.image_url && !s.video_url).length
@@ -344,6 +350,31 @@ function LoadedInfo({
         </button>
       )}
 
+      {/* Refresh videos from backend */}
+      {onRefreshVideos && (
+        <button
+          onClick={onRefreshVideos}
+          disabled={isRefreshing}
+          className="w-full py-2 text-xs text-amber-400 hover:text-amber-300 border border-amber-800 hover:border-amber-600 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+        >
+          {isRefreshing ? "⏳ Actualizando..." : "🔄 Actualizar Videos"}
+        </button>
+      )}
+
+      {/* Delete all videos */}
+      {videoCount > 0 && onDeleteAllVideos && (
+        <button
+          onClick={() => {
+            if (window.confirm("¿Borrar TODOS los videos de este capítulo? Las imágenes se mantienen.")) {
+              onDeleteAllVideos()
+            }
+          }}
+          className="w-full py-2 text-xs text-red-400 hover:text-red-300 border border-red-900 hover:border-red-700 rounded-lg transition-colors"
+        >
+          🗑 Borrar todos los videos
+        </button>
+      )}
+
       <button
         onClick={onLoadAnother}
         className="w-full py-2 text-xs text-[var(--text-secondary)] hover:text-white border border-[var(--border-default)] hover:border-[var(--border-strong)] rounded-lg transition-colors"
@@ -368,7 +399,9 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter,
   })
   const [loginError, setLoginError] = useState("")
   const [loadedData, setLoadedData] = useState<ZentrixEditorData | null>(null)
+  const [loadedChapterId, setLoadedChapterId] = useState<string | null>(null)
   const [hasTiming, setHasTiming] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
   const handleLogin = useCallback(async (email: string, pass: string) => {
     setLoginError("")
@@ -393,11 +426,45 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter,
   const handleLoad = useCallback(
     (result: ZentrixChapterWithTiming) => {
       setLoadedData(result.data)
+      setLoadedChapterId(result.chapterId)
       setHasTiming(!!result.timing)
       onLoadChapter(result)
     },
     [onLoadChapter],
   )
+
+  const handleRefreshVideos = useCallback(async () => {
+    if (!loadedChapterId || !token) return
+    setIsRefreshing(true)
+    try {
+      const data: ZentrixEditorData = await apiFetch(
+        `/api/image-studio/chapters/${loadedChapterId}/editor-data`,
+        token,
+      )
+      setLoadedData(data)
+      onLoadChapter({ data, timing: null, chapterId: loadedChapterId })
+    } catch (e: unknown) {
+      console.error("Refresh failed:", e)
+    } finally {
+      setIsRefreshing(false)
+    }
+  }, [loadedChapterId, token, onLoadChapter])
+
+  const handleDeleteAllVideos = useCallback(async () => {
+    if (!loadedChapterId || !token) return
+    try {
+      await apiFetch(`/api/image-studio/chapters/${loadedChapterId}/all-videos`, token, { method: "DELETE" })
+      // Refresh data after deletion
+      const data: ZentrixEditorData = await apiFetch(
+        `/api/image-studio/chapters/${loadedChapterId}/editor-data`,
+        token,
+      )
+      setLoadedData(data)
+      onLoadChapter({ data, timing: null, chapterId: loadedChapterId })
+    } catch (e: unknown) {
+      console.error("Delete videos failed:", e)
+    }
+  }, [loadedChapterId, token, onLoadChapter])
 
   return (
     <div className="flex h-full w-[320px] flex-col border-r border-[var(--border-default)] bg-[var(--surface-0)]">
@@ -415,7 +482,7 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter,
         {!token ? (
           <LoginForm onLogin={handleLogin} error={loginError} />
         ) : loadedData ? (
-          <LoadedInfo data={loadedData} hasTiming={hasTiming} onLoadAnother={() => setLoadedData(null)} onClear={() => { setLoadedData(null); onClearProject(); }} onOpenProduction={onOpenProduction} />
+          <LoadedInfo data={loadedData} hasTiming={hasTiming} onLoadAnother={() => { setLoadedData(null); setLoadedChapterId(null); }} onClear={() => { setLoadedData(null); setLoadedChapterId(null); onClearProject(); }} onOpenProduction={onOpenProduction} onRefreshVideos={handleRefreshVideos} onDeleteAllVideos={handleDeleteAllVideos} isRefreshing={isRefreshing} />
         ) : (
           <ChapterSelector token={token} onLoad={handleLoad} onLogout={handleLogout} />
         )}
