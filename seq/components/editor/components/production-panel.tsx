@@ -191,6 +191,8 @@ interface SceneState {
   status: "pending" | "ready" | "generating" | "done" | "error"
   videoUrl: string | null
   errorMsg: string
+  volume: number         // 0-200, default 100 (percentage)
+  jobId: string | null   // for cancel functionality
 }
 
 function getPrice(modelId: string, duration: number, resolution: Resolution): number {
@@ -233,6 +235,7 @@ function SceneCard({
   onApplyKBToAll,
   onChange,
   onGenerate,
+  onCancel,
   onDelete,
 }: {
   scene: SceneState
@@ -243,6 +246,7 @@ function SceneCard({
   onApplyKBToAll: (config: KBConfig) => void
   onChange: (updates: Partial<SceneState>) => void
   onGenerate: () => void
+  onCancel: () => void
   onDelete: () => void
 }) {
   const cost = getPrice(scene.model, scene.duration, scene.resolution)
@@ -554,7 +558,22 @@ function SceneCard({
         </select>
       </div>
 
-      {/* Bottom: Cost + Generate */}
+      {/* Volume Control */}
+      <div className="px-3 pb-1 flex items-center gap-2">
+        <span className="text-[8px] text-[var(--text-tertiary)] w-6">🔊</span>
+        <input
+          type="range"
+          min={0}
+          max={200}
+          value={scene.volume}
+          onChange={(e) => onChange({ volume: Number(e.target.value) })}
+          className="flex-1 h-1 accent-emerald-500"
+          title={`Volumen: ${scene.volume}%`}
+        />
+        <span className="text-[8px] text-[var(--text-tertiary)] w-8 text-right">{scene.volume}%</span>
+      </div>
+
+      {/* Bottom: Cost + Generate/Cancel */}
       <div className="px-3 pb-3 flex items-center justify-between">
         <span className={`text-xs font-bold ${cost === 0 ? "text-green-400" : cost < 1 ? "text-blue-400" : "text-amber-400"}`}>
           ${cost.toFixed(3)}
@@ -570,7 +589,12 @@ function SceneCard({
         ) : scene.status === "done" ? (
           <span className="text-[10px] text-green-400 font-medium">✅ Listo</span>
         ) : (
-          <span className="text-[10px] text-amber-400 animate-pulse">⏳ Generando...</span>
+          <button
+            onClick={onCancel}
+            className="px-2 py-1 text-[9px] font-medium text-red-400 border border-red-800 hover:bg-red-900/30 rounded-lg transition-colors"
+          >
+            ✕ Cancelar
+          </button>
         )}
       </div>
     </div>
@@ -647,6 +671,7 @@ export const ProductionPanel = memo(function ProductionPanel({
         index: s.index, model: s.model, resolution: s.resolution,
         motionPrompt: s.motionPrompt, classification: s.classification,
         kbConfig: s.kbConfig, status: s.status, videoUrl: s.videoUrl,
+        volume: s.volume, jobId: s.jobId,
       }))
       localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(toSave))
     } catch {}
@@ -696,6 +721,8 @@ export const ProductionPanel = memo(function ProductionPanel({
           status: s.video_url ? "done" as const : (saved?.status === "done" && saved?.videoUrl) ? "done" as const : "pending" as const,
           videoUrl: s.video_url || saved?.videoUrl || null,
           errorMsg: "",
+          volume: saved?.volume ?? 100,
+          jobId: saved?.jobId || null,
         }
       })
     setScenes(initial)
@@ -857,6 +884,37 @@ export const ProductionPanel = memo(function ProductionPanel({
     // ALWAYS reset the scene regardless of backend response
     updateScene(sceneIndex, { status: "pending", videoUrl: null, errorMsg: "" })
   }, [chapterId, updateScene])
+
+  const cancelSceneVideo = useCallback(async (sceneIndex: number) => {
+    const scene = scenes.find((s) => s.index === sceneIndex)
+    if (!chapterId || !scene?.jobId) {
+      updateScene(sceneIndex, { status: "pending", errorMsg: "" })
+      return
+    }
+    try {
+      const result = await apiFetch(`/api/image-studio/chapters/${chapterId}/cancel-job/${scene.jobId}`, {
+        method: "POST",
+      })
+      updateScene(sceneIndex, { status: "pending", jobId: null, errorMsg: "" })
+      setStatusMsg(result.credits_saved ? `✅ Escena ${sceneIndex + 1} cancelada — créditos ahorrados` : `⚠️ Escena ${sceneIndex + 1} cancelada — crédito ya consumido`)
+    } catch {
+      updateScene(sceneIndex, { status: "pending", jobId: null, errorMsg: "" })
+      setStatusMsg(`✕ Escena ${sceneIndex + 1} cancelada localmente`)
+    }
+  }, [chapterId, scenes, updateScene])
+
+  const cancelAllQueued = useCallback(async () => {
+    if (!chapterId) return
+    try {
+      const result = await apiFetch(`/api/image-studio/chapters/${chapterId}/cancel-all-queued`, { method: "POST" })
+      setScenes((prev) => prev.map((s) =>
+        s.status === "generating" ? { ...s, status: "pending" as const, jobId: null, errorMsg: "" } : s
+      ))
+      setStatusMsg(`✕ ${result.cancelled} jobs cancelados`)
+    } catch {
+      setStatusMsg("❌ Error al cancelar")
+    }
+  }, [chapterId])
 
   /* ── Generate single scene ── */
   const generateScene = useCallback(async (sceneIndex: number) => {
@@ -1272,6 +1330,15 @@ export const ProductionPanel = memo(function ProductionPanel({
             )}
           </button>
 
+          {generatingCount > 0 && (
+            <button
+              onClick={cancelAllQueued}
+              className="px-3 py-2 text-xs font-medium text-red-400 border border-red-800 hover:bg-red-900/30 rounded-lg transition-colors flex items-center gap-1"
+            >
+              ✕ Cancelar Todo ({generatingCount})
+            </button>
+          )}
+
           <button
             onClick={handleExport}
             disabled={isExporting || doneCount === 0}
@@ -1322,6 +1389,7 @@ export const ProductionPanel = memo(function ProductionPanel({
                 onApplyKBToAll={applyKBToAll}
                 onChange={(updates) => updateScene(scene.index, updates)}
                 onGenerate={() => generateScene(scene.index)}
+                onCancel={() => cancelSceneVideo(scene.index)}
                 onDelete={() => deleteSceneVideo(scene.index)}
               />
             )
