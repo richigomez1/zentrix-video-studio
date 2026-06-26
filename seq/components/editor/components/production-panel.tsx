@@ -849,11 +849,13 @@ export const ProductionPanel = memo(function ProductionPanel({
       await apiFetch(`/api/image-studio/chapters/${chapterId}/video/${sceneIndex}`, {
         method: "DELETE",
       })
-      updateScene(sceneIndex, { status: "pending", videoUrl: null, errorMsg: "" })
       setStatusMsg(`🗑 Video de escena ${sceneIndex + 1} eliminado`)
-    } catch (e: unknown) {
-      setStatusMsg(`❌ Error al borrar: ${e instanceof Error ? e.message : "Error"}`)
+    } catch {
+      // Backend says no video — that's fine, clean up UI anyway
+      setStatusMsg(`🗑 Escena ${sceneIndex + 1} reseteada`)
     }
+    // ALWAYS reset the scene regardless of backend response
+    updateScene(sceneIndex, { status: "pending", videoUrl: null, errorMsg: "" })
   }, [chapterId, updateScene])
 
   /* ── Generate single scene ── */
@@ -1197,7 +1199,15 @@ export const ProductionPanel = memo(function ProductionPanel({
                 setScenes((prev) =>
                   prev.map((s) => {
                     const vid = data.videos.find((v: any) => v.segment_index === s.index)
-                    if (!vid) return s
+
+                    // If backend has no record AND scene claims to be done → reset to pending
+                    if (!vid) {
+                      if (s.status === "done" && s.videoUrl) {
+                        updated++
+                        return { ...s, status: "pending" as const, videoUrl: null, errorMsg: "" }
+                      }
+                      return s
+                    }
 
                     // Determine best URL: prefer AI model over ken-burns
                     const veoUrl = vid.veo_url
@@ -1207,6 +1217,12 @@ export const ProductionPanel = memo(function ProductionPanel({
                     const isKB = s.model === "ken-burns"
                     const relevantStatus = isKB ? kbStatus : (veoStatus !== "none" ? veoStatus : kbStatus)
                     const relevantUrl = isKB ? kbUrl : (veoUrl || kbUrl)
+
+                    // Backend says no video exists for this scene → reset
+                    if (relevantStatus === "none" && s.status === "done") {
+                      updated++
+                      return { ...s, status: "pending" as const, videoUrl: null, errorMsg: "" }
+                    }
 
                     // Update if: new video found, or status changed, or URL refreshed
                     if (relevantStatus === "done" && relevantUrl) {
