@@ -1413,6 +1413,11 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                               }
 
                               timeline.setMedia(mediaItems)
+                              // Set tracks: video ambient at 30%, narration at 100%
+                              timeline.setTracks([
+                                { id: "v1", type: "video", name: "VIDEO 1", isMuted: false, volume: 0.3, isLocked: false },
+                                { id: "a1", type: "audio", name: "AUDIO 1", isMuted: false, volume: 1.0, isLocked: false },
+                              ])
                               setTimeout(() => {
                                 timeline.setTimelineClips(clips)
                               }, 100)
