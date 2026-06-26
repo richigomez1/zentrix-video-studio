@@ -616,307 +616,93 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
 
   const handleImport = mediaManagement.handleImport
 
-  // Export handlers
+  // Export handlers — server-side via backend (bypasses CORS)
   const startExport = useCallback(
-    async (resolution: "720p" | "1080p", source: "all" | "selection") => {
-      if (!ffmpeg.ffmpegRef.current) {
-        console.error("FFmpeg not loaded")
+    async (resolution: "720p" | "1080p", _source: "all" | "selection") => {
+      if (!loadedChapterId) {
+        alert("No hay capítulo cargado. Carga un capítulo desde Zentrix primero.")
         return
       }
 
+      const token = typeof window !== "undefined" ? localStorage.getItem("zentrix_token") : null
+      if (!token) {
+        alert("No estás autenticado en Zentrix. Inicia sesión en el panel Zentrix primero.")
+        return
+      }
+
+      const EXPORT_BACKEND =
+        typeof window !== "undefined" && window.location.hostname === "localhost"
+          ? "http://localhost:8000"
+          : "https://zentrix-backend-mcvk.onrender.com"
+
       ffmpeg.exportCancelledRef.current = false
       ffmpeg.setIsExporting(true)
-      ffmpeg.abortExportRef.current = false
       ffmpeg.setDownloadUrl(null)
       ffmpeg.setExportProgress(0)
       ffmpeg.setExportPhase("init")
       playback.setIsPlaying(false)
 
-      const exportStartTime = source === "all" ? 0 : timeline.selectionBounds?.start || 0
-      const exportEndTime =
-        source === "all" ? timeline.contentDuration : timeline.selectionBounds?.end || timeline.contentDuration
-      const exportDuration = exportEndTime - exportStartTime
-
-      if (exportDuration <= 0) {
-        alert("Export duration is too short or empty.")
-        ffmpeg.setIsExporting(false)
-        ffmpeg.setExportPhase("idle")
-        return
-      }
-
-      const ffmpegInstance = ffmpeg.ffmpegRef.current!
-      let width: number, height: number
-      if (resolution === "1080p") {
-        width = 1920
-        height = 1080
-      } else {
-        width = 1280
-        height = 720
-      }
-
-      const canReusePreview =
-        ffmpeg.renderedPreviewUrl && !ffmpeg.isPreviewStale && source === "all" && resolution === "720p"
-
-      if (canReusePreview) {
-        ffmpeg.setExportPhase("encoding")
-        ffmpeg.setExportProgress(10)
-
-        try {
-          const response = await fetch(ffmpeg.renderedPreviewUrl!)
-          const previewBlob = await response.arrayBuffer()
-          await ffmpegInstance.writeFile("preview_input.mp4", new Uint8Array(previewBlob))
-          ffmpeg.setExportProgress(30)
-
-          ffmpegInstance.on("progress", ({ progress }) => {
-            ffmpeg.setExportProgress(30 + Math.round(progress * 65))
-          })
-
-          await ffmpegInstance.exec([
-            "-i",
-            "preview_input.mp4",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "medium",
-            "-crf",
-            String(FFMPEG_CONSTANTS.EXPORT_CRF),
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-pix_fmt",
-            "yuv420p",
-            "-movflags",
-            "+faststart",
-            "output.mp4",
-          ])
-
-          ffmpeg.setExportPhase("complete")
-          ffmpeg.setExportProgress(95)
-
-          const data = (await ffmpegInstance.readFile("output.mp4")) as any
-          const url = URL.createObjectURL(new Blob([data], { type: "video/mp4" }))
-          ffmpeg.setDownloadUrl(url)
-          ffmpeg.setExportProgress(100)
-
-          try {
-            await ffmpegInstance.deleteFile("preview_input.mp4")
-          } catch (e) { }
-          try {
-            await ffmpegInstance.deleteFile("output.mp4")
-          } catch (e) { }
-        } catch (err: any) {
-          if (err.message !== "Export cancelled") {
-            console.error("Export Failed", err)
-            alert(`Export failed: ${err.message}`)
-          }
-        } finally {
-          ffmpeg.setIsExporting(false)
-          ffmpeg.setExportPhase("idle")
-        }
-        return
-      }
-
-      // Full render path
       try {
-        const fps = 30
-        const dt = 1 / fps
+        // Step 1: Create export job on server
+        ffmpeg.setExportProgress(5)
 
-        // Audio render
-        ffmpeg.setExportPhase("audio")
-        const sampleRate = FFMPEG_CONSTANTS.AUDIO_SAMPLE_RATE
-        const totalFrames = Math.ceil(exportDuration * sampleRate)
-        // Find the webkitOfflineAudioContext usages and replace with typed version
-        const OfflineCtx = window.OfflineAudioContext || (window as WebkitWindow).webkitOfflineAudioContext
-        if (!OfflineCtx) {
-          alert("Web Audio API OfflineAudioContext not supported.")
-          ffmpeg.setIsExporting(false)
-          ffmpeg.setExportPhase("idle")
-          return
-        }
-        const offlineCtx = new OfflineCtx(2, totalFrames, sampleRate)
-        const audioBufferMap = new Map<string, AudioBuffer>()
-        const uniqueMediaIds = new Set(
-          timeline.timelineClips.filter((c) => c.trackId.startsWith("a") || !c.isAudioDetached).map((c) => c.mediaId),
+        const createRes = await fetch(
+          `${EXPORT_BACKEND}/api/image-studio/chapters/${loadedChapterId}/export-chapter`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ resolution }),
+          },
         )
+        const createData = await createRes.json()
+        if (!createRes.ok) throw new Error(createData.detail || "Error al crear exportación")
 
+        const jobId = createData.export_job_id
         ffmpeg.setExportProgress(10)
-
-        for (const mid of uniqueMediaIds) {
-          if (ffmpeg.abortExportRef.current) throw new Error("Export cancelled")
-          const item = timeline.mediaMap[mid]
-          if (item?.url) {
-            try {
-              const response = await fetch(item.url)
-              const arrayBuffer = await response.arrayBuffer()
-              const audioBuffer = await offlineCtx.decodeAudioData(arrayBuffer)
-              audioBufferMap.set(mid, audioBuffer)
-            } catch (e) { }
-          }
-        }
-
-        ffmpeg.setExportProgress(25)
-
-        timeline.timelineClips.forEach((clip) => {
-          if (ffmpeg.abortExportRef.current) return
-          const track = timeline.tracks.find((t) => t.id === clip.trackId)
-          if (track?.isMuted) return
-          if (track?.type === "video" && clip.isAudioDetached) return
-
-          let startInDest = clip.start - exportStartTime
-          let clipOffset = clip.offset
-          let clipDuration = clip.duration
-
-          if (startInDest < 0) {
-            const diff = -startInDest
-            if (diff >= clipDuration) return
-            clipOffset += diff
-            clipDuration -= diff
-            startInDest = 0
-          }
-          if (startInDest + clipDuration > exportDuration) {
-            clipDuration -= startInDest + clipDuration - exportDuration
-          }
-          if (clipDuration <= 0) return
-
-          const buffer = audioBufferMap.get(clip.mediaId)
-          if (buffer) {
-            const source = offlineCtx.createBufferSource()
-            source.buffer = buffer
-            const gainNode = offlineCtx.createGain()
-            const baseVolume = (track?.volume ?? 1) * (clip.volume ?? 1)
-            gainNode.gain.setValueAtTime(baseVolume, offlineCtx.currentTime + startInDest)
-            source.connect(gainNode)
-            gainNode.connect(offlineCtx.destination)
-            source.start(startInDest, clipOffset, clipDuration)
-          }
-        })
-
-        if (ffmpeg.abortExportRef.current) throw new Error("Export cancelled")
-        const renderedBuffer = await offlineCtx.startRendering()
-        const wavData = audioBufferToWav(renderedBuffer)
-        await ffmpegInstance.writeFile("audio.wav", new Uint8Array(wavData))
-
-        // Video render
-        if (ffmpeg.abortExportRef.current || ffmpeg.exportCancelledRef.current) throw new Error("Export cancelled")
-        ffmpeg.setExportPhase("video")
-
-        let isVertical = false
-        const firstClip = timeline.timelineClips.sort((a, b) => a.start - b.start)[0]
-        if (firstClip) {
-          const m = timeline.mediaMap[firstClip.mediaId]
-          if (m?.resolution && m.resolution.height > m.resolution.width) isVertical = true
-        }
-
-        let targetW = width
-        let targetH = height
-        if (isVertical) {
-          ;[targetW, targetH] = [targetH, targetW]
-        }
-
-        if (playback.canvasRef.current) {
-          playback.canvasRef.current.width = targetW
-          playback.canvasRef.current.height = targetH
-        }
-        const renderCtx = playback.canvasRef.current!.getContext("2d", { alpha: false })!
-        renderCtx.imageSmoothingEnabled = true
-        renderCtx.imageSmoothingQuality = "high"
-
-        let exportTime = exportStartTime
-        let frameCount = 0
-
-        while (exportTime < exportEndTime && !ffmpeg.exportCancelledRef.current) {
-          if (ffmpeg.abortExportRef.current) throw new Error("Export cancelled")
-
-          playback.syncMediaToTime(exportTime, true)
-          await Promise.all([
-            playback.waitForVideoReady(playback.videoRefA.current!),
-            playback.waitForVideoReady(playback.videoRefB.current!),
-          ])
-
-          playback.drawFrameToCanvas(renderCtx, targetW, targetH, exportTime)
-
-          const blob: Blob = await new Promise((resolve, reject) => {
-            playback.canvasRef.current!.toBlob(
-              (b) => (b ? resolve(b) : reject(new Error("Canvas toBlob failed"))),
-              "image/jpeg",
-              FFMPEG_CONSTANTS.JPEG_QUALITY,
-            )
-          })
-
-          const buffer = await blob.arrayBuffer()
-          await ffmpegInstance.writeFile(`frame${frameCount.toString().padStart(4, "0")}.jpg`, new Uint8Array(buffer))
-
-          ffmpeg.setExportProgress(5 + ((exportTime - exportStartTime) / exportDuration) * 70)
-          exportTime += dt
-          frameCount++
-          await new Promise<void>((resolve) => setTimeout(resolve, 0))
-        }
-
-        if (frameCount === 0) throw new Error("No frames were rendered.")
-
-        // Encode
-        if (ffmpeg.abortExportRef.current) throw new Error("Export cancelled")
         ffmpeg.setExportPhase("encoding")
-        ffmpeg.setExportProgress(75)
 
-        ffmpegInstance.on("progress", ({ progress }) => {
-          ffmpeg.setExportProgress(75 + Math.round(progress * 23))
-        })
+        // Step 2: Poll status until done
+        const maxAttempts = 300 // ~15 min max (3s × 300)
+        let attempts = 0
 
-        await ffmpegInstance.exec([
-          "-framerate",
-          "30",
-          "-i",
-          "frame%04d.jpg",
-          "-i",
-          "audio.wav",
-          "-c:a",
-          "aac",
-          "-c:v",
-          "libx264",
-          "-pix_fmt",
-          "yuv420p",
-          "-shortest",
-          "output.mp4",
-        ])
+        while (attempts < maxAttempts) {
+          if (ffmpeg.exportCancelledRef.current) throw new Error("Export cancelled")
 
-        ffmpeg.setExportPhase("complete")
-        ffmpeg.setExportProgress(98)
+          await new Promise((r) => setTimeout(r, 3000))
 
-        const data = (await ffmpegInstance.readFile("output.mp4")) as any
-        const url = URL.createObjectURL(new Blob([data], { type: "video/mp4" }))
-        ffmpeg.setDownloadUrl(url)
-        ffmpeg.setExportProgress(100)
+          const statusRes = await fetch(
+            `${EXPORT_BACKEND}/api/image-studio/chapters/${loadedChapterId}/export-status/${jobId}`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          )
+          const status = await statusRes.json()
 
-        // Cleanup
-        try {
-          await ffmpegInstance.deleteFile("audio.wav")
-        } catch (e) { }
-        try {
-          await ffmpegInstance.deleteFile("output.mp4")
-        } catch (e) { }
-        for (let i = 0; i < frameCount; i++) {
-          try {
-            await ffmpegInstance.deleteFile(`frame${i.toString().padStart(4, "0")}.jpg`)
-          } catch (e) { }
+          if (status.status === "done" && status.download_url) {
+            ffmpeg.setExportPhase("complete")
+            ffmpeg.setExportProgress(100)
+            ffmpeg.setDownloadUrl(status.download_url)
+            return
+          } else if (status.status === "error") {
+            throw new Error(status.error || "Error en la exportación del servidor")
+          }
+
+          // Estimate progress (linear ramp to 90%)
+          attempts++
+          ffmpeg.setExportProgress(Math.min(90, 10 + Math.round((attempts / 60) * 80)))
         }
+
+        throw new Error("La exportación tardó demasiado. Revisa el estado en el Panel de Producción.")
       } catch (err: unknown) {
-        const errorMessage = err instanceof Error ? err.message : ""
-        if (errorMessage !== "Export cancelled") {
+        const msg = err instanceof Error ? err.message : ""
+        if (msg !== "Export cancelled") {
           console.error("Export Failed", err)
-          alert(`Export failed: ${errorMessage || "Unknown error"}`)
+          alert(`Exportación fallida: ${msg || "Error desconocido"}`)
         }
-        ffmpeg.setExportPhase("idle")
       } finally {
         ffmpeg.setIsExporting(false)
-        playback.setCurrentTime(0)
-        if (playback.videoRefA.current) playback.videoRefA.current.style.opacity = "1"
-        if (playback.videoRefB.current) playback.videoRefB.current.style.opacity = "0"
-        if (playback.videoRefA.current) playback.videoRefA.current.muted = false
+        ffmpeg.setExportPhase("idle")
       }
     },
-    [ffmpeg, playback, timeline],
+    [ffmpeg, playback, loadedChapterId],
   )
 
   const handleCancelExport = useCallback(() => {
