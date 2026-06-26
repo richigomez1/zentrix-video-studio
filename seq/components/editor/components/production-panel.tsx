@@ -23,9 +23,8 @@ interface ModelInfo {
 
 const MODELS: ModelInfo[] = [
   { id: "ken-burns", name: "Ken Burns", durations: [4, 5, 6, 8, 10, 12, 15], price720: 0, price1080: 0, emoji: "🎞", tier: "Gratis" },
-  { id: "pruna-video-draft", name: "PrunaAI Draft", durations: [5, 10, 15, 20], price720: 0.005, price1080: 0.01, emoji: "⚡", tier: "¢" },
-  { id: "pruna-video", name: "PrunaAI", durations: [5, 10, 15, 20], price720: 0.02, price1080: 0.04, emoji: "🎬", tier: "$" },
-  { id: "pruna-video-animate", name: "PrunaAI Animate", durations: [5, 10, 15, 20], price720: 0.03, price1080: 0.06, emoji: "🎭", tier: "$" },
+  { id: "pruna-video-draft", name: "PrunaAI Draft", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.005, price1080: 0.01, emoji: "⚡", tier: "¢" },
+  { id: "pruna-video", name: "PrunaAI", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.02, price1080: 0.04, emoji: "🎬", tier: "$" },
   { id: "seedance-1-pro-fast", name: "SD 1.0 Fast", durations: [4, 6, 8, 12], price720: 0.025, price1080: 0.06, emoji: "⚡", tier: "$" },
   { id: "seedance-1.5-pro", name: "SD 1.5 Pro", durations: [5, 8, 10, 12], price720: 0.052, price1080: 0.10, emoji: "🎥", tier: "$$" },
   { id: "seedance-2.0-fast", name: "SD 2.0 Fast", durations: [5, 8, 10, 15], price720: 0.15, price1080: 0.30, emoji: "🔥", tier: "$$$" },
@@ -45,36 +44,48 @@ const TIER_CONFIG: Record<TierName, { label: string; emoji: string; color: strin
     label: "Económico",
     emoji: "🟢",
     color: "bg-emerald-600 hover:bg-emerald-500",
-    description: "PrunaAI Draft + SD 1.0 Fast",
+    description: "PrunaAI Draft — $0.005/seg",
     mapping: {
-      4: "seedance-1-pro-fast",       // $0.025/s — SD 1.0 Fast
-      5: "pruna-video-draft",         // $0.005/s — PrunaAI Draft (75% más barato)
-      6: "seedance-1-pro-fast",       // $0.025/s
-      8: "seedance-1-pro-fast",       // $0.025/s
-      10: "pruna-video-draft",        // $0.005/s
-      12: "seedance-1-pro-fast",      // $0.025/s
-      15: "pruna-video-draft",        // $0.005/s — PrunaAI soporta hasta 20s
+      3: "pruna-video-draft",
+      4: "pruna-video-draft",
+      5: "pruna-video-draft",
+      6: "pruna-video-draft",
+      7: "pruna-video-draft",
+      8: "pruna-video-draft",
+      9: "pruna-video-draft",
+      10: "pruna-video-draft",
+      11: "pruna-video-draft",
+      12: "pruna-video-draft",
+      13: "pruna-video-draft",
+      14: "pruna-video-draft",
+      15: "pruna-video-draft",
     },
   },
   equilibrado: {
     label: "Equilibrado",
     emoji: "🟡",
     color: "bg-amber-600 hover:bg-amber-500",
-    description: "Veo Lite + PrunaAI + SD 1.5 Pro",
+    description: "PrunaAI + Veo Lite",
     mapping: {
-      4: "seedance-1-pro-fast",   // $0.025/s — no hay mejor a 4s
-      5: "veo-3.1-lite-generate-preview", // $0.05/s — Veo Lite
-      6: "seedance-1-pro-fast",   // $0.025/s — Veo no soporta 6s
-      8: "veo-3.1-lite-generate-preview", // $0.05/s — Veo Lite
-      10: "pruna-video",          // $0.02/s — PrunaAI normal
-      12: "seedance-1.5-pro",     // $0.052/s
-      15: "pruna-video",          // $0.02/s — PrunaAI soporta hasta 20s
+      3: "pruna-video",
+      4: "pruna-video",
+      5: "veo-3.1-lite-generate-preview",
+      6: "pruna-video",
+      7: "pruna-video",
+      8: "veo-3.1-lite-generate-preview",
+      9: "pruna-video",
+      10: "pruna-video",
+      11: "pruna-video",
+      12: "pruna-video",
+      13: "pruna-video",
+      14: "pruna-video",
+      15: "pruna-video",
     },
   },
 }
 
 // All possible durations across all models
-const ALL_DURATIONS = [4, 5, 6, 8, 10, 12, 15, 20]
+const ALL_DURATIONS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 20]
 
 type Resolution = "720p" | "1080p"
 
