@@ -662,13 +662,13 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
         ffmpeg.setExportPhase("encoding")
 
         // Step 2: Poll status until done
-        const maxAttempts = 300 // ~15 min max (3s × 300)
+        const maxAttempts = 720 // ~60 min max (5s × 720)
         let attempts = 0
 
         while (attempts < maxAttempts) {
           if (ffmpeg.exportCancelledRef.current) throw new Error("Export cancelled")
 
-          await new Promise((r) => setTimeout(r, 3000))
+          await new Promise((r) => setTimeout(r, 5000))
 
           const statusRes = await fetch(
             `${EXPORT_BACKEND}/api/image-studio/chapters/${loadedChapterId}/export-status/${jobId}`,
