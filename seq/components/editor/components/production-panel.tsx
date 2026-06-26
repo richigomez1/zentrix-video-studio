@@ -37,7 +37,7 @@ const MODELS: ModelInfo[] = [
 const MODEL_MAP = Object.fromEntries(MODELS.map((m) => [m.id, m]))
 
 /* ── Tier Presets: auto-assign model by duration ── */
-type TierName = "economico" | "equilibrado"
+type TierName = "economico" | "equilibrado" | "balanceado" | "premium"
 
 const TIER_CONFIG: Record<TierName, { label: string; emoji: string; color: string; description: string; mapping: Record<number, string> }> = {
   economico: {
@@ -65,7 +65,28 @@ const TIER_CONFIG: Record<TierName, { label: string; emoji: string; color: strin
     label: "Equilibrado",
     emoji: "🟡",
     color: "bg-amber-600 hover:bg-amber-500",
-    description: "PrunaAI + Veo Lite",
+    description: "PrunaAI Normal — $0.02/seg",
+    mapping: {
+      3: "pruna-video",
+      4: "pruna-video",
+      5: "pruna-video",
+      6: "pruna-video",
+      7: "pruna-video",
+      8: "pruna-video",
+      9: "pruna-video",
+      10: "pruna-video",
+      11: "pruna-video",
+      12: "pruna-video",
+      13: "pruna-video",
+      14: "pruna-video",
+      15: "pruna-video",
+    },
+  },
+  balanceado: {
+    label: "Balanceado",
+    emoji: "🟠",
+    color: "bg-orange-600 hover:bg-orange-500",
+    description: "PrunaAI + Veo Lite — mejor calidad",
     mapping: {
       3: "pruna-video",
       4: "pruna-video",
@@ -80,6 +101,27 @@ const TIER_CONFIG: Record<TierName, { label: string; emoji: string; color: strin
       13: "pruna-video",
       14: "pruna-video",
       15: "pruna-video",
+    },
+  },
+  premium: {
+    label: "Premium",
+    emoji: "🔴",
+    color: "bg-red-600 hover:bg-red-500",
+    description: "Veo Fast + Full — máxima calidad",
+    mapping: {
+      3: "veo-3.1-fast-generate-preview",
+      4: "veo-3.1-fast-generate-preview",
+      5: "veo-3.1-fast-generate-preview",
+      6: "veo-3.1-fast-generate-preview",
+      7: "veo-3.1-fast-generate-preview",
+      8: "veo-3.1-generate-preview",
+      9: "veo-3.1-fast-generate-preview",
+      10: "veo-3.1-fast-generate-preview",
+      11: "veo-3.1-fast-generate-preview",
+      12: "veo-3.1-fast-generate-preview",
+      13: "veo-3.1-fast-generate-preview",
+      14: "veo-3.1-fast-generate-preview",
+      15: "veo-3.1-fast-generate-preview",
     },
   },
 }
@@ -622,14 +664,14 @@ export const ProductionPanel = memo(function ProductionPanel({
     } catch {}
 
     const initial: SceneState[] = chapterData.scenes
-      .filter((s) => s.image_url)
+      .filter((s) => s.image_url || s.video_url)
       .map((s) => {
         const rawDuration = (s.end_time !== null && s.start_time !== null)
           ? Math.round(s.end_time - s.start_time)
           : 8
         const duration = snapToStandardDuration(rawDuration)
         const compatible = getCompatibleModels(duration)
-        const defaultModel = compatible.find((m) => m.id === "ken-burns") ? "ken-burns" : compatible[0]?.id || "ken-burns"
+        const defaultModel = compatible.find((m) => m.id === "pruna-video-draft") ? "pruna-video-draft" : compatible.find((m) => m.id === "ken-burns") ? "ken-burns" : compatible[0]?.id || "ken-burns"
 
         // Restore saved config if available
         const saved = savedMap[s.index]
@@ -1147,20 +1189,33 @@ export const ProductionPanel = memo(function ProductionPanel({
                   prev.map((s) => {
                     const vid = data.videos.find((v: any) => v.segment_index === s.index)
                     if (!vid) return s
-                    const url = vid.kb_url || vid.veo_url
-                    const status = vid.kb_status !== "none" ? vid.kb_status : vid.veo_status
-                    if (status === "done" && url && s.status !== "done") {
+
+                    // Determine best URL: prefer AI model over ken-burns
+                    const veoUrl = vid.veo_url
+                    const kbUrl = vid.kb_url
+                    const veoStatus = vid.veo_status
+                    const kbStatus = vid.kb_status
+                    const isKB = s.model === "ken-burns"
+                    const relevantStatus = isKB ? kbStatus : (veoStatus !== "none" ? veoStatus : kbStatus)
+                    const relevantUrl = isKB ? kbUrl : (veoUrl || kbUrl)
+
+                    // Update if: new video found, or status changed, or URL refreshed
+                    if (relevantStatus === "done" && relevantUrl) {
+                      if (s.status !== "done" || s.videoUrl !== relevantUrl) {
+                        updated++
+                        onVideoGenerated(s.index, relevantUrl)
+                        return { ...s, status: "done" as const, videoUrl: relevantUrl, errorMsg: "" }
+                      }
+                    } else if (relevantStatus === "error" && s.status !== "error") {
                       updated++
-                      onVideoGenerated(s.index, url)
-                      return { ...s, status: "done" as const, videoUrl: url }
-                    }
-                    if (status === "error" && s.status === "generating") {
-                      return { ...s, status: "error" as const, errorMsg: vid.veo_error || "Error" }
+                      return { ...s, status: "error" as const, errorMsg: vid.veo_error || "Error de generación" }
+                    } else if ((relevantStatus === "queued" || relevantStatus === "processing" || relevantStatus === "polling") && s.status !== "generating") {
+                      return { ...s, status: "generating" as const }
                     }
                     return s
                   })
                 )
-                setStatusMsg(`🔄 ${updated} videos nuevos detectados`)
+                setStatusMsg(updated > 0 ? `🔄 ${updated} escenas actualizadas` : "✅ Todo al día — sin cambios")
               } catch { setStatusMsg("❌ Error al actualizar") }
             }}
             className="px-3 py-2 text-xs font-medium text-white bg-cyan-600 hover:bg-cyan-500 rounded-lg transition-colors flex items-center gap-1"
@@ -1195,12 +1250,13 @@ export const ProductionPanel = memo(function ProductionPanel({
           <button
             onClick={handleExport}
             disabled={isExporting || doneCount === 0}
+            title="Combina todos los videos + audio en un solo archivo MP4 descargable"
             className="px-4 py-2 text-xs font-medium text-white bg-green-600 hover:bg-green-500 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-2"
           >
             {isExporting ? (
               <><span className="animate-spin">📦</span> Exportando...</>
             ) : (
-              <>📦 Exportar Capítulo</>
+              <>📦 Descargar Video Final</>
             )}
           </button>
 
