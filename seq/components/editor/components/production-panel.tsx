@@ -518,8 +518,7 @@ function SceneCard({
         {scene.status === "pending" || scene.status === "ready" || scene.status === "error" ? (
           <button
             onClick={onGenerate}
-            disabled={!hasPrompt && scene.model !== "ken-burns"}
-            className="px-3 py-1 text-[10px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            className="px-3 py-1 text-[10px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors"
           >
             ▶ Generar
           </button>
@@ -815,9 +814,33 @@ export const ProductionPanel = memo(function ProductionPanel({
     updateScene(sceneIndex, { status: "generating", errorMsg: "" })
 
     try {
-      const motionPromptToSend = scene.model === "ken-burns"
+      let motionPromptToSend = scene.model === "ken-burns"
         ? JSON.stringify(scene.kbConfig)
         : scene.motionPrompt
+
+      // Auto-generate motion prompt if empty (for non-Ken Burns models)
+      if (!motionPromptToSend?.trim() && scene.model !== "ken-burns") {
+        setStatusMsg(`🤖 Generando prompt para escena ${sceneIndex + 1}...`)
+        const promptResult = await apiFetch(
+          `/api/image-studio/chapters/${chapterId}/improve-motion-prompt`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              segment_index: sceneIndex,
+              video_model: scene.model,
+              motion_prompt: "",
+              audio_prompt: "",
+            }),
+          }
+        )
+        motionPromptToSend = promptResult.motion_prompt || ""
+        // Update scene with the generated prompt
+        updateScene(sceneIndex, { 
+          motionPrompt: motionPromptToSend,
+          status: "generating" as const,
+        })
+      }
+
       await apiFetch(`/api/image-studio/chapters/${chapterId}/animate-scene`, {
         method: "POST",
         body: JSON.stringify({
@@ -841,10 +864,10 @@ export const ProductionPanel = memo(function ProductionPanel({
   const handleBatchGenerate = useCallback(async () => {
     if (!chapterId) return
     const pendingScenes = scenes.filter(
-      (s) => (s.status === "pending" || s.status === "ready") && (s.motionPrompt.trim() || s.model === "ken-burns")
+      (s) => (s.status === "pending" || s.status === "ready" || s.status === "error") && s.model !== ""
     )
     if (pendingScenes.length === 0) {
-      setStatusMsg("⚠️ No hay escenas listas. Auto-prepara los motion prompts primero.")
+      setStatusMsg("⚠️ No hay escenas pendientes de generar.")
       return
     }
 
@@ -861,9 +884,29 @@ export const ProductionPanel = memo(function ProductionPanel({
     let sent = 0
     for (const scene of pendingScenes) {
       try {
-        const motionPromptToSend = scene.model === "ken-burns"
+        let motionPromptToSend = scene.model === "ken-burns"
           ? JSON.stringify(scene.kbConfig)
           : scene.motionPrompt
+
+        // Auto-generate motion prompt if empty
+        if (!motionPromptToSend?.trim() && scene.model !== "ken-burns") {
+          if (mountedRef.current) setStatusMsg(`🤖 Prompt escena ${scene.index + 1}... (${sent}/${pendingScenes.length})`)
+          const promptResult = await apiFetch(
+            `/api/image-studio/chapters/${chapterId}/improve-motion-prompt`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                segment_index: scene.index,
+                video_model: scene.model,
+                motion_prompt: "",
+                audio_prompt: "",
+              }),
+            }
+          )
+          motionPromptToSend = promptResult.motion_prompt || ""
+          updateScene(scene.index, { motionPrompt: motionPromptToSend })
+        }
+
         await apiFetch(`/api/image-studio/chapters/${chapterId}/animate-scene`, {
           method: "POST",
           body: JSON.stringify({
