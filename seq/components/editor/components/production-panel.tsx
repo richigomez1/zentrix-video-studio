@@ -342,7 +342,10 @@ function SceneCard({
 
       {/* Motion Prompt OR Ken Burns Config */}
       <div className="px-3 pb-2">
-        {scene.model === "ken-burns" ? (
+        {scene.model === "ken-burns" && scene.status === "done" ? (
+          /* ── Ken Burns Done — compact label ── */
+          <div className="text-[9px] text-[var(--text-tertiary)]">🎞 Ken Burns aplicado</div>
+        ) : scene.model === "ken-burns" ? (
           /* ── Ken Burns Config Panel ── */
           <div>
             <label className="text-[9px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
@@ -676,9 +679,15 @@ export const ProductionPanel = memo(function ProductionPanel({
         // Restore saved config if available
         const saved = savedMap[s.index]
 
+        // Determine model: if saved as ken-burns but no KB video exists, switch to PrunaAI Draft
+        let model = saved?.model || (s.video_url ? (s.video_model || defaultModel) : defaultModel)
+        if (model === "ken-burns" && !s.video_url && !(saved?.status === "done" && saved?.videoUrl)) {
+          model = defaultModel // pruna-video-draft
+        }
+
         return {
           index: s.index,
-          model: saved?.model || (s.video_url ? (s.video_model || defaultModel) : defaultModel),
+          model,
           duration,
           resolution: (saved?.resolution || "720p") as Resolution,
           motionPrompt: saved?.motionPrompt || "",
