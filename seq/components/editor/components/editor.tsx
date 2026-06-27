@@ -1153,6 +1153,16 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
             chapterProjectName={loadedChapterData?.project_name}
             chapterNumber={loadedChapterData?.chapter_number}
             chapterTitle={loadedChapterData?.chapter_title}
+            audioUrls={
+              timeline.tracks
+                .filter((t) => t.type === "audio")
+                .flatMap((t) =>
+                  timeline.timelineClips
+                    .filter((c) => c.trackId === t.id)
+                    .map((c) => timeline.mediaMap[c.mediaId]?.url)
+                )
+                .filter(Boolean) as string[]
+            }
           />
           <ShortcutsModal isOpen={isShortcutsOpen} onClose={() => setIsShortcutsOpen(false)} />
 
