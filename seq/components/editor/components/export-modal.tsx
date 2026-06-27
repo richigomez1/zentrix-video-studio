@@ -25,46 +25,27 @@ interface ExportModalProps {
   onCancel: () => void
   hasRenderedPreview?: boolean
   ffmpegError?: string | null
-  /* NEW — for browser export */
   chapterId?: string | null
   chapterProjectName?: string
   chapterNumber?: number
   chapterTitle?: string
 }
 
-type ExportMethod = "browser" | "server"
-type BrowserPhase = "idle" | "loading-ffmpeg" | "downloading" | "normalizing" | "merging" | "done" | "error"
+type ExportPhase = "idle" | "loading" | "downloading" | "normalizing" | "merging" | "done" | "error"
 
 interface SceneClip {
   index: number
   videoUrl: string
   duration: number
   volume: number
+  actualDuration?: number // measured after normalization
 }
 
 const XFADE_DURATION = 1
 const TARGET_FPS = 30
-const TARGET_WIDTH = 1280
-const TARGET_HEIGHT = 720
+const BATCH_SIZE = 10 // xfade in groups of 10 for reliability
 
 /* ── Helpers ── */
-const getPhaseInfo = (phase: ExportModalProps["exportPhase"], progress: number) => {
-  switch (phase) {
-    case "init":
-      return { label: "Initializing", detail: "Loading FFmpeg engine...", showProgress: false }
-    case "audio":
-      return { label: "Processing Audio", detail: "Mixing audio tracks and applying effects...", showProgress: true }
-    case "video":
-      return { label: "Rendering Frames", detail: "Rendering video frames...", showProgress: true }
-    case "encoding":
-      return { label: "Encoding Video", detail: "Finalizing MP4 file...", showProgress: true }
-    case "complete":
-      return { label: "Complete", detail: "Export finished!", showProgress: false }
-    default:
-      return { label: "Preparing", detail: "Getting ready...", showProgress: false }
-  }
-}
-
 const formatTime = (sec: number) => {
   const m = Math.floor(sec / 60)
   const s = sec % 60
@@ -80,70 +61,13 @@ async function apiFetch(path: string) {
   return res.json()
 }
 
-/* ── Sub-components ── */
-const StepIndicator = memo(function StepIndicator({
-  exportPhase,
-}: {
-  exportPhase: ExportModalProps["exportPhase"]
-}) {
-  const phases = ["init", "audio", "video", "encoding", "complete"]
-  const currentIdx = phases.indexOf(exportPhase)
-
-  return (
-    <div className="flex items-center justify-between px-2">
-      {(["audio", "video", "encoding"] as const).map((step, idx) => {
-        const stepLabels = { audio: "Audio", video: "Video", encoding: "Encode" }
-        const stepIdx = phases.indexOf(step)
-        const isActive = exportPhase === step
-        const isComplete = currentIdx > stepIdx
-
-        return (
-          <div key={step} className="flex items-center flex-1">
-            <div className="flex flex-col items-center flex-1">
-              <div
-                className={`
-                w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all
-                ${
-                  isComplete
-                    ? "bg-[var(--success)] text-white"
-                    : isActive
-                      ? "bg-[var(--tertiary)] text-white ring-4 ring-[var(--tertiary)]/30"
-                      : "bg-[var(--surface-2)] text-[var(--text-secondary)]"
-                }
-              `}
-              >
-                {isComplete ? (
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : (
-                  idx + 1
-                )}
-              </div>
-              <span
-                className={`text-[10px] mt-1.5 font-medium ${isActive ? "text-[var(--tertiary)]" : isComplete ? "text-[var(--success)]" : "text-[var(--text-muted)]"}`}
-              >
-                {stepLabels[step]}
-              </span>
-            </div>
-            {idx < 2 && (
-              <div className={`h-0.5 flex-1 mx-1 ${isComplete ? "bg-[var(--success)]" : "bg-[var(--surface-2)]"}`} />
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
-})
-
+/* ── Resolution Selector ── */
 const ResolutionSelector = memo(function ResolutionSelector({
   resolution,
   onSelect,
-  hasRenderedPreview,
 }: {
   resolution: "720p" | "1080p"
   onSelect: (res: "720p" | "1080p") => void
-  hasRenderedPreview: boolean
 }) {
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -151,10 +75,8 @@ const ResolutionSelector = memo(function ResolutionSelector({
         onClick={() => onSelect("1080p")}
         className={`p-3 rounded-lg border text-left transition-all ${resolution === "1080p" ? "bg-[var(--tertiary-muted)] border-[var(--tertiary)]" : "bg-[var(--surface-1)] border-[var(--border-default)] hover:border-[var(--border-emphasis)]"}`}
       >
-        <div
-          className={`text-sm font-medium ${resolution === "1080p" ? "text-[var(--tertiary)]" : "text-[var(--text-primary)]"}`}
-        >
-          1080p High
+        <div className={`text-sm font-medium ${resolution === "1080p" ? "text-[var(--tertiary)]" : "text-[var(--text-primary)]"}`}>
+          1080p
         </div>
         <div className="text-[10px] text-[var(--text-secondary)] mt-1">1920×1080 · Mejor calidad</div>
       </button>
@@ -162,21 +84,17 @@ const ResolutionSelector = memo(function ResolutionSelector({
         onClick={() => onSelect("720p")}
         className={`p-3 rounded-lg border text-left transition-all ${resolution === "720p" ? "bg-[var(--tertiary-muted)] border-[var(--tertiary)]" : "bg-[var(--surface-1)] border-[var(--border-default)] hover:border-[var(--border-emphasis)]"}`}
       >
-        <div
-          className={`text-sm font-medium ${resolution === "720p" ? "text-[var(--tertiary)]" : "text-[var(--text-primary)]"}`}
-        >
-          720p Fast
+        <div className={`text-sm font-medium ${resolution === "720p" ? "text-[var(--tertiary)]" : "text-[var(--text-primary)]"}`}>
+          720p
         </div>
-        <div className="text-[10px] text-[var(--text-secondary)] mt-1">
-          1280×720 · {hasRenderedPreview ? "Export instantáneo" : "Más rápido"}
-        </div>
+        <div className="text-[10px] text-[var(--text-secondary)] mt-1">1280×720 · Más rápido</div>
       </button>
     </div>
   )
 })
 
 /* ═══════════════════════════════════════════════════════════════
-   MAIN EXPORT MODAL
+   EXPORT MODAL
    ═══════════════════════════════════════════════════════════════ */
 export const ExportModal = memo(function ExportModal({
   isOpen,
@@ -195,59 +113,43 @@ export const ExportModal = memo(function ExportModal({
   chapterTitle,
 }: ExportModalProps) {
   const [resolution, setResolution] = useState<"720p" | "1080p">("1080p")
-  const [isInitializing, setIsInitializing] = useState(false)
-  const [exportMethod, setExportMethod] = useState<ExportMethod>("browser")
 
-  /* ── Browser Export State ── */
-  const [browserPhase, setBrowserPhase] = useState<BrowserPhase>("idle")
-  const [browserProgress, setBrowserProgress] = useState(0)
-  const [browserStatus, setBrowserStatus] = useState("")
-  const [browserError, setBrowserError] = useState("")
-  const [browserDownloadUrl, setBrowserDownloadUrl] = useState<string | null>(null)
-  const [browserElapsed, setBrowserElapsed] = useState(0)
-  const [browserClipCount, setBrowserClipCount] = useState(0)
+  /* ── Export State ── */
+  const [phase, setPhase] = useState<ExportPhase>("idle")
+  const [progress, setProgress] = useState(0)
+  const [statusMsg, setStatusMsg] = useState("")
+  const [detailMsg, setDetailMsg] = useState("")
+  const [errorMsg, setErrorMsg] = useState("")
+  const [localDownloadUrl, setLocalDownloadUrl] = useState<string | null>(null)
+  const [elapsed, setElapsed] = useState(0)
+  const [clipCount, setClipCount] = useState(0)
   const ffmpegRef = useRef<FFmpeg | null>(null)
   const cancelledRef = useRef(false)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const startTimeRef = useRef(0)
+  const detectedDurationRef = useRef<number>(0)
 
-  const hasBrowserExport = !!chapterId
-
-  // Cleanup
   useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [])
 
-  // Reset browser state when modal opens
   useEffect(() => {
-    if (isOpen) {
-      setIsInitializing(false)
-      if (browserPhase !== "downloading" && browserPhase !== "normalizing" && browserPhase !== "merging" && browserPhase !== "loading-ffmpeg") {
-        setBrowserPhase("idle")
-        setBrowserProgress(0)
-        setBrowserStatus("")
-        setBrowserError("")
-      }
+    if (isOpen && phase !== "downloading" && phase !== "normalizing" && phase !== "merging" && phase !== "loading") {
+      setPhase("idle")
+      setProgress(0)
+      setStatusMsg("")
+      setDetailMsg("")
+      setErrorMsg("")
     }
   }, [isOpen])
-
-  useEffect(() => {
-    if (isExporting) setIsInitializing(false)
-  }, [isExporting])
-
-  useEffect(() => {
-    if (ffmpegError) setIsInitializing(false)
-  }, [ffmpegError])
 
   /* ── Timer ── */
   const startTimer = useCallback(() => {
     startTimeRef.current = Date.now()
-    setBrowserElapsed(0)
+    setElapsed(0)
     if (timerRef.current) clearInterval(timerRef.current)
     timerRef.current = setInterval(() => {
-      setBrowserElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000))
+      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000))
     }, 1000)
   }, [])
 
@@ -255,12 +157,20 @@ export const ExportModal = memo(function ExportModal({
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
   }, [])
 
-  /* ── Load FFmpeg.wasm (single-threaded, no COOP/COEP headers needed) ── */
+  /* ── Load FFmpeg.wasm ── */
   const loadFFmpeg = async (): Promise<FFmpeg> => {
     if (ffmpegRef.current) return ffmpegRef.current
     const ffmpeg = new FFmpeg()
+    // Capture duration from FFmpeg logs
     ffmpeg.on("log", ({ message }) => {
-      // console.log("[FFmpeg]", message)
+      const durMatch = message.match(/Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/)
+      if (durMatch) {
+        const h = parseInt(durMatch[1])
+        const m = parseInt(durMatch[2])
+        const s = parseInt(durMatch[3])
+        const cs = parseInt(durMatch[4])
+        detectedDurationRef.current = h * 3600 + m * 60 + s + cs / 100
+      }
     })
     const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd"
     await ffmpeg.load({
@@ -276,7 +186,6 @@ export const ExportModal = memo(function ExportModal({
     if (!chapterId) throw new Error("No chapter loaded")
     const data = await apiFetch(`/api/image-studio/chapters/${chapterId}/video-progress`)
     if (!data.videos || !Array.isArray(data.videos)) throw new Error("No videos found")
-
     const clips: SceneClip[] = []
     for (const vid of data.videos) {
       const url = vid.veo_url || vid.kb_url
@@ -286,7 +195,7 @@ export const ExportModal = memo(function ExportModal({
           index: vid.segment_index,
           videoUrl: url,
           duration: vid.duration || 8,
-          volume: vid.volume ?? 30, // default 30% for sleep content
+          volume: vid.volume ?? 30,
         })
       }
     }
@@ -295,35 +204,147 @@ export const ExportModal = memo(function ExportModal({
     return clips
   }
 
+  /* ── Probe actual duration of a file ── */
+  const probeFileDuration = async (ffmpeg: FFmpeg, filename: string): Promise<number> => {
+    detectedDurationRef.current = 0
+    try {
+      await ffmpeg.exec(["-i", filename, "-f", "null", "-"])
+    } catch {
+      // ffmpeg returns non-zero when writing to null, but we got the duration from logs
+    }
+    return detectedDurationRef.current
+  }
+
+  /* ── xfade a list of files, return output filename ── */
+  const xfadeFiles = async (
+    ffmpeg: FFmpeg,
+    inputFiles: string[],
+    durations: number[],
+    outputFile: string,
+  ): Promise<boolean> => {
+    if (inputFiles.length === 0) return false
+
+    if (inputFiles.length === 1) {
+      // Single file — just copy
+      const data = await ffmpeg.readFile(inputFiles[0])
+      await ffmpeg.writeFile(outputFile, data)
+      return true
+    }
+
+    // Build input args
+    const inputArgs: string[] = []
+    for (const f of inputFiles) {
+      inputArgs.push("-i", f)
+    }
+
+    // Build xfade filter chain
+    let videoFilter = ""
+    let audioFilter = ""
+    let cumulativeOffset = 0
+    const n = inputFiles.length
+
+    for (let i = 0; i < n - 1; i++) {
+      const clipDur = durations[i]
+      // Ensure offset is positive and valid
+      const offset = Math.max(0, cumulativeOffset + clipDur - XFADE_DURATION)
+      const inLabel = i === 0 ? `[${i}:v]` : `[v${i}]`
+      const nextLabel = `[${i + 1}:v]`
+      const outLabel = i === n - 2 ? "[vout]" : `[v${i + 1}]`
+
+      videoFilter += `${inLabel}${nextLabel}xfade=transition=fade:duration=${XFADE_DURATION}:offset=${offset.toFixed(3)}${outLabel}`
+      if (i < n - 2) videoFilter += ";"
+
+      const aIn = i === 0 ? `[${i}:a]` : `[a${i}]`
+      const aNext = `[${i + 1}:a]`
+      const aOut = i === n - 2 ? "[aout]" : `[a${i + 1}]`
+
+      audioFilter += `${aIn}${aNext}acrossfade=d=${XFADE_DURATION}:c1=tri:c2=tri${aOut}`
+      if (i < n - 2) audioFilter += ";"
+
+      cumulativeOffset = offset
+    }
+
+    const filterComplex = videoFilter + ";" + audioFilter
+
+    try {
+      await ffmpeg.exec([
+        ...inputArgs,
+        "-filter_complex", filterComplex,
+        "-map", "[vout]", "-map", "[aout]",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+        "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart",
+        "-y", outputFile,
+      ])
+
+      // Verify output exists and has content
+      const result = await ffmpeg.readFile(outputFile)
+      if (result.length < 1000) {
+        console.warn(`xfade output ${outputFile} too small (${result.length} bytes), likely corrupted`)
+        return false
+      }
+      return true
+    } catch (err) {
+      console.warn(`xfade failed for ${outputFile}:`, err)
+      return false
+    }
+  }
+
+  /* ── Concat fallback (no transitions, just join) ── */
+  const concatFiles = async (
+    ffmpeg: FFmpeg,
+    inputFiles: string[],
+    outputFile: string,
+  ): Promise<void> => {
+    let concatList = ""
+    for (const f of inputFiles) {
+      concatList += `file '${f}'\n`
+    }
+    const encoder = new TextEncoder()
+    await ffmpeg.writeFile("concat_list.txt", encoder.encode(concatList))
+
+    await ffmpeg.exec([
+      "-f", "concat", "-safe", "0", "-i", "concat_list.txt",
+      "-c", "copy",
+      "-movflags", "+faststart",
+      "-y", outputFile,
+    ])
+  }
+
   /* ══════════════════════════════════════
-     BROWSER EXPORT — Main Flow
+     EXPORT FLOW
      ══════════════════════════════════════ */
-  const handleBrowserExport = useCallback(async () => {
+  const handleExport = useCallback(async () => {
     cancelledRef.current = false
-    setBrowserPhase("loading-ffmpeg")
-    setBrowserProgress(0)
-    setBrowserStatus("Cargando FFmpeg.wasm (~30 MB, solo la primera vez)...")
-    setBrowserError("")
-    setBrowserDownloadUrl(null)
+    setPhase("loading")
+    setProgress(0)
+    setStatusMsg("Preparando...")
+    setDetailMsg("")
+    setErrorMsg("")
+    setLocalDownloadUrl(null)
     startTimer()
 
     try {
-      // ── Load FFmpeg ──
       const ffmpeg = await loadFFmpeg()
       if (cancelledRef.current) { stopTimer(); return }
 
-      // ── Fetch scene data ──
-      setBrowserStatus("Obteniendo datos de escenas...")
+      // Fetch scenes
+      setStatusMsg("Obteniendo escenas...")
       const clips = await fetchSceneClips()
-      setBrowserClipCount(clips.length)
+      setClipCount(clips.length)
       if (cancelledRef.current) { stopTimer(); return }
 
-      // ── Download clips from R2 ──
-      setBrowserPhase("downloading")
+      const tw = resolution === "1080p" ? 1920 : 1280
+      const th = resolution === "1080p" ? 1080 : 720
+
+      // ════════════════════════════════════════
+      // PHASE 1: Download all clips
+      // ════════════════════════════════════════
+      setPhase("downloading")
       for (let i = 0; i < clips.length; i++) {
         if (cancelledRef.current) { stopTimer(); return }
-        setBrowserStatus(`Descargando clip ${i + 1} de ${clips.length}...`)
-        setBrowserProgress(Math.round((i / clips.length) * 100))
+        setStatusMsg(`Descargando clip ${i + 1} de ${clips.length}`)
+        setProgress(Math.round((i / clips.length) * 100))
 
         const response = await fetch(clips[i].videoUrl)
         if (!response.ok) throw new Error(`Error descargando clip ${i + 1}: HTTP ${response.status}`)
@@ -333,22 +354,23 @@ export const ExportModal = memo(function ExportModal({
 
       if (cancelledRef.current) { stopTimer(); return }
 
-      // ── Normalize each clip (fps, resolution, volume, ensure audio) ──
-      setBrowserPhase("normalizing")
-      setBrowserProgress(0)
+      // ════════════════════════════════════════
+      // PHASE 2: Normalize + measure actual durations
+      // ════════════════════════════════════════
+      setPhase("normalizing")
+      setProgress(0)
 
-      const tw = resolution === "1080p" ? 1920 : TARGET_WIDTH
-      const th = resolution === "1080p" ? 1080 : TARGET_HEIGHT
+      const actualDurations: number[] = []
 
       for (let i = 0; i < clips.length; i++) {
         if (cancelledRef.current) { stopTimer(); return }
-        setBrowserStatus(`Normalizando clip ${i + 1} de ${clips.length}...`)
-        setBrowserProgress(Math.round((i / clips.length) * 100))
+        setStatusMsg(`Procesando clip ${i + 1} de ${clips.length}`)
+        setProgress(Math.round((i / clips.length) * 100))
 
         const vol = clips[i].volume / 100
         const vf = `fps=${TARGET_FPS},scale=${tw}:${th}:force_original_aspect_ratio=decrease,pad=${tw}:${th}:(ow-iw)/2:(oh-ih)/2,setsar=1`
 
-        // Try with audio first
+        // Try with audio
         let normOk = false
         try {
           await ffmpeg.exec([
@@ -364,7 +386,7 @@ export const ExportModal = memo(function ExportModal({
         } catch { normOk = false }
 
         if (!normOk) {
-          // Fallback: no audio track — add silent audio
+          // No audio — add silent audio
           await ffmpeg.exec([
             "-i", `input_${i}.mp4`,
             "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
@@ -378,478 +400,321 @@ export const ExportModal = memo(function ExportModal({
           ])
         }
 
-        // Free input memory
+        // Free input
         try { await ffmpeg.deleteFile(`input_${i}.mp4`) } catch {}
+
+        // Measure actual duration
+        const dur = await probeFileDuration(ffmpeg, `norm_${i}.mp4`)
+        actualDurations.push(dur > 0 ? dur : clips[i].duration)
+        setDetailMsg(`Clip ${i + 1}: ${dur.toFixed(1)}s real`)
       }
 
       if (cancelledRef.current) { stopTimer(); return }
 
-      // ── Merge with crossfade (xfade) ──
-      setBrowserPhase("merging")
-      setBrowserProgress(0)
+      // ════════════════════════════════════════
+      // PHASE 3: Merge with BATCHED xfade
+      // ════════════════════════════════════════
+      setPhase("merging")
+      setProgress(0)
 
-      if (clips.length === 1) {
-        setBrowserStatus("Finalizando video...")
-        const d = await ffmpeg.readFile("norm_0.mp4")
-        await ffmpeg.writeFile("output.mp4", d)
-        try { await ffmpeg.deleteFile("norm_0.mp4") } catch {}
-      } else {
-        setBrowserStatus(`Uniendo ${clips.length} clips con crossfade...`)
+      // Split into batches
+      const numBatches = Math.ceil(clips.length / BATCH_SIZE)
+      const batchFiles: string[] = []
+      const batchDurations: number[] = []
 
-        // Build input args
-        const inputArgs: string[] = []
-        for (let i = 0; i < clips.length; i++) {
-          inputArgs.push("-i", `norm_${i}.mp4`)
+      for (let b = 0; b < numBatches; b++) {
+        if (cancelledRef.current) { stopTimer(); return }
+        const startIdx = b * BATCH_SIZE
+        const endIdx = Math.min(startIdx + BATCH_SIZE, clips.length)
+        const batchClipFiles = []
+        const batchClipDurations = []
+
+        for (let i = startIdx; i < endIdx; i++) {
+          batchClipFiles.push(`norm_${i}.mp4`)
+          batchClipDurations.push(actualDurations[i])
         }
 
-        // Build xfade filter chain
-        let videoFilter = ""
-        let audioFilter = ""
-        let cumulativeOffset = 0
+        const batchFile = `batch_${b}.mp4`
+        setStatusMsg(`Uniendo lote ${b + 1} de ${numBatches} (clips ${startIdx + 1}-${endIdx})`)
+        setProgress(Math.round((b / numBatches) * 80))
 
-        for (let i = 0; i < clips.length - 1; i++) {
-          const clipDur = clips[i].duration
-          const offset = cumulativeOffset + clipDur - XFADE_DURATION
-          const inLabel = i === 0 ? `[${i}:v]` : `[v${i}]`
-          const nextLabel = `[${i + 1}:v]`
-          const outLabel = i === clips.length - 2 ? "[vout]" : `[v${i + 1}]`
-
-          videoFilter += `${inLabel}${nextLabel}xfade=transition=fade:duration=${XFADE_DURATION}:offset=${offset.toFixed(2)}${outLabel}`
-          if (i < clips.length - 2) videoFilter += ";"
-
-          const aInLabel = i === 0 ? `[${i}:a]` : `[a${i}]`
-          const aNextLabel = `[${i + 1}:a]`
-          const aOutLabel = i === clips.length - 2 ? "[aout]" : `[a${i + 1}]`
-
-          audioFilter += `${aInLabel}${aNextLabel}acrossfade=d=${XFADE_DURATION}:c1=tri:c2=tri${aOutLabel}`
-          if (i < clips.length - 2) audioFilter += ";"
-
-          cumulativeOffset = offset
-        }
-
-        const filterComplex = videoFilter + ";" + audioFilter
-
-        try {
-          await ffmpeg.exec([
-            ...inputArgs,
-            "-filter_complex", filterComplex,
-            "-map", "[vout]", "-map", "[aout]",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-            "-c:a", "aac", "-b:a", "128k",
-            "-movflags", "+faststart",
-            "-y", "output.mp4",
-          ])
-        } catch (xfadeErr) {
-          // Fallback: simple concat if xfade fails
-          console.warn("xfade failed, falling back to concat:", xfadeErr)
-          setBrowserStatus("Crossfade falló — usando concat simple...")
-
-          let concatList = ""
-          for (let i = 0; i < clips.length; i++) {
-            concatList += `file 'norm_${i}.mp4'\n`
+        if (batchClipFiles.length === 1) {
+          // Single clip batch — just rename
+          const d = await ffmpeg.readFile(batchClipFiles[0])
+          await ffmpeg.writeFile(batchFile, d)
+        } else {
+          const xfadeOk = await xfadeFiles(ffmpeg, batchClipFiles, batchClipDurations, batchFile)
+          if (!xfadeOk) {
+            // Fallback: concat without transitions
+            setDetailMsg(`Lote ${b + 1}: usando concat simple`)
+            await concatFiles(ffmpeg, batchClipFiles, batchFile)
           }
-          const encoder = new TextEncoder()
-          await ffmpeg.writeFile("concat.txt", encoder.encode(concatList))
-
-          await ffmpeg.exec([
-            "-f", "concat", "-safe", "0", "-i", "concat.txt",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-            "-c:a", "aac", "-b:a", "128k",
-            "-movflags", "+faststart",
-            "-y", "output.mp4",
-          ])
         }
 
-        // Clean up normalized clips
-        for (let i = 0; i < clips.length; i++) {
-          try { await ffmpeg.deleteFile(`norm_${i}.mp4`) } catch {}
+        // Clean up normalized clips in this batch
+        for (const f of batchClipFiles) {
+          try { await ffmpeg.deleteFile(f) } catch {}
+        }
+
+        // Measure batch duration for next stage
+        const batchDur = await probeFileDuration(ffmpeg, batchFile)
+        batchFiles.push(batchFile)
+        batchDurations.push(batchDur > 0 ? batchDur : batchClipDurations.reduce((a, b) => a + b, 0) - (batchClipDurations.length - 1) * XFADE_DURATION)
+      }
+
+      if (cancelledRef.current) { stopTimer(); return }
+
+      // Final merge: xfade the batches together
+      if (batchFiles.length === 1) {
+        setStatusMsg("Finalizando video...")
+        const d = await ffmpeg.readFile(batchFiles[0])
+        await ffmpeg.writeFile("output.mp4", d)
+        try { await ffmpeg.deleteFile(batchFiles[0]) } catch {}
+      } else {
+        setStatusMsg(`Uniendo ${batchFiles.length} lotes finales...`)
+        setProgress(85)
+
+        const finalXfadeOk = await xfadeFiles(ffmpeg, batchFiles, batchDurations, "output.mp4")
+        if (!finalXfadeOk) {
+          setDetailMsg("Usando concat simple para unión final")
+          await concatFiles(ffmpeg, batchFiles, "output.mp4")
+        }
+
+        // Clean up batch files
+        for (const f of batchFiles) {
+          try { await ffmpeg.deleteFile(f) } catch {}
         }
       }
 
       if (cancelledRef.current) { stopTimer(); return }
 
-      // ── Create download URL ──
-      setBrowserStatus("Preparando descarga...")
+      // ════════════════════════════════════════
+      // PHASE 4: Verify + download
+      // ════════════════════════════════════════
+      setStatusMsg("Verificando video...")
+      setProgress(95)
+
       const outputData = await ffmpeg.readFile("output.mp4")
+      if (outputData.length < 10000) {
+        throw new Error(`Archivo de salida demasiado pequeño (${outputData.length} bytes). El video no se generó correctamente.`)
+      }
+
+      // Check duration of final output
+      const finalDuration = await probeFileDuration(ffmpeg, "output.mp4")
+      if (finalDuration < 1) {
+        throw new Error("El video final tiene duración 0. Posible error de codificación.")
+      }
+
       const blob = new Blob([outputData], { type: "video/mp4" })
       const url = URL.createObjectURL(blob)
       try { await ffmpeg.deleteFile("output.mp4") } catch {}
 
-      setBrowserDownloadUrl(url)
-      setBrowserPhase("done")
-      setBrowserProgress(100)
-      setBrowserStatus("¡Exportación completa!")
+      setLocalDownloadUrl(url)
+      setPhase("done")
+      setProgress(100)
+      setStatusMsg("¡Exportación completa!")
+      setDetailMsg(`${clips.length} clips · ${Math.round(finalDuration)}s · ${resolution}`)
       stopTimer()
     } catch (err: unknown) {
       if (cancelledRef.current) { stopTimer(); return }
       const msg = err instanceof Error ? err.message : "Error desconocido"
-      console.error("Browser export error:", err)
-      setBrowserPhase("error")
-      setBrowserError(msg)
+      console.error("Export error:", err)
+      setPhase("error")
+      setErrorMsg(msg)
       stopTimer()
     }
   }, [chapterId, resolution, startTimer, stopTimer])
 
-  const handleBrowserCancel = useCallback(() => {
+  const handleCancel = useCallback(() => {
     cancelledRef.current = true
-    setBrowserPhase("idle")
-    setBrowserProgress(0)
-    setBrowserStatus("")
+    setPhase("idle")
+    setProgress(0)
+    setStatusMsg("")
+    setDetailMsg("")
     stopTimer()
   }, [stopTimer])
 
-  const handleBrowserDownload = useCallback(() => {
-    if (!browserDownloadUrl) return
+  const handleDownload = useCallback(() => {
+    if (!localDownloadUrl) return
     const a = document.createElement("a")
-    a.href = browserDownloadUrl
+    a.href = localDownloadUrl
     const safeName = `${chapterProjectName || "zentrix"}_cap${chapterNumber || 1}`.replace(/[^a-zA-Z0-9_-]/g, "_")
     a.download = `${safeName}.mp4`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-  }, [browserDownloadUrl, chapterProjectName, chapterNumber])
-
-  /* ── Server export handlers (unchanged) ── */
-  const handleStartClick = useCallback(async () => {
-    if (exportMethod === "browser") {
-      handleBrowserExport()
-    } else {
-      setIsInitializing(true)
-      onStartExport(resolution)
-    }
-  }, [exportMethod, handleBrowserExport, onStartExport, resolution])
-
-  const handleResolutionChange = useCallback((res: "720p" | "1080p") => {
-    setResolution(res)
-  }, [])
+  }, [localDownloadUrl, chapterProjectName, chapterNumber])
 
   const handleClose = useCallback(() => {
-    if (browserPhase === "downloading" || browserPhase === "normalizing" || browserPhase === "merging" || browserPhase === "loading-ffmpeg") {
+    if (phase === "downloading" || phase === "normalizing" || phase === "merging" || phase === "loading") {
       if (!confirm("¿Cancelar la exportación en progreso?")) return
       cancelledRef.current = true
       stopTimer()
     }
-    setBrowserPhase("idle")
+    setPhase("idle")
     onClose()
-  }, [browserPhase, onClose, stopTimer])
+  }, [phase, onClose, stopTimer])
+
+  const handleStartClick = useCallback(() => {
+    if (chapterId) {
+      handleExport()
+    } else {
+      onStartExport(resolution)
+    }
+  }, [chapterId, handleExport, onStartExport, resolution])
 
   if (!isOpen) return null
 
-  const willReusePreview = hasRenderedPreview && resolution === "720p"
-  const phaseInfo = getPhaseInfo(exportPhase, exportProgress)
-
-  const isBrowserWorking = browserPhase === "loading-ffmpeg" || browserPhase === "downloading" || browserPhase === "normalizing" || browserPhase === "merging"
+  const isWorking = phase === "loading" || phase === "downloading" || phase === "normalizing" || phase === "merging"
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-[var(--surface-0)] border border-[var(--border-default)] rounded-xl shadow-2xl w-[520px] overflow-hidden flex flex-col">
+      <div className="bg-[var(--surface-0)] border border-[var(--border-default)] rounded-xl shadow-2xl w-[500px] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="h-14 px-6 flex items-center justify-between border-b border-[var(--border-default)] bg-[var(--surface-0)]">
           <h3 className="text-sm font-bold text-white uppercase tracking-wider">Exportar Video</h3>
-          <button
-            onClick={handleClose}
-            className="text-[var(--text-secondary)] hover:text-white transition-colors"
-            disabled={isExporting}
-          >
+          <button onClick={handleClose} className="text-[var(--text-secondary)] hover:text-white transition-colors" disabled={isExporting}>
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
+              <path d="M18 6 6 18" /><path d="m6 6 12 12" />
             </svg>
           </button>
         </div>
 
         {/* Content */}
         <div className="p-6">
-          {/* ════════════════════════════════════════════════
-             BROWSER EXPORT — Active states
-             ════════════════════════════════════════════════ */}
-          {exportMethod === "browser" && isBrowserWorking ? (
+          {/* ── Working ── */}
+          {isWorking ? (
             <div className="flex flex-col gap-4 py-2">
-              {/* Phase label */}
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="animate-pulse text-lg">💻</span>
-                  <div>
-                    <p className="text-sm font-medium text-white">
-                      {browserPhase === "loading-ffmpeg" && "Cargando motor de video..."}
-                      {browserPhase === "downloading" && "Descargando clips..."}
-                      {browserPhase === "normalizing" && "Normalizando clips..."}
-                      {browserPhase === "merging" && "Uniendo con transiciones..."}
-                    </p>
-                    <p className="text-[10px] text-[var(--text-secondary)] mt-0.5">{browserStatus}</p>
-                  </div>
+                <div>
+                  <p className="text-sm font-medium text-white">
+                    {phase === "loading" && "Preparando..."}
+                    {phase === "downloading" && "Descargando clips..."}
+                    {phase === "normalizing" && "Procesando clips..."}
+                    {phase === "merging" && "Uniendo con transiciones..."}
+                  </p>
+                  <p className="text-[10px] text-[var(--text-secondary)] mt-0.5">{statusMsg}</p>
+                  {detailMsg && <p className="text-[9px] text-[var(--text-muted)] mt-0.5">{detailMsg}</p>}
                 </div>
-                <span className="text-xs text-[var(--text-secondary)] font-mono">{formatTime(browserElapsed)}</span>
+                <span className="text-xs text-[var(--text-secondary)] font-mono">{formatTime(elapsed)}</span>
               </div>
 
-              {/* Progress bar */}
               <div className="space-y-1.5">
                 <div className="h-2 w-full bg-[var(--surface-2)] rounded-full overflow-hidden">
-                  {browserPhase === "loading-ffmpeg" ? (
+                  {phase === "loading" ? (
                     <div className="h-full bg-[var(--tertiary-muted)] w-full animate-pulse" />
                   ) : (
-                    <div
-                      className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-300 rounded-full"
-                      style={{ width: `${browserProgress}%` }}
-                    />
+                    <div className="h-full bg-[var(--tertiary)] transition-all duration-300 rounded-full" style={{ width: `${progress}%` }} />
                   )}
                 </div>
-                {browserPhase !== "loading-ffmpeg" && (
-                  <div className="flex justify-end">
-                    <span className="text-xs text-cyan-400 font-medium">{browserProgress}%</span>
+                {phase !== "loading" && (
+                  <div className="flex justify-between">
+                    <span className="text-[10px] text-[var(--text-secondary)]">{clipCount} clips · {resolution}</span>
+                    <span className="text-xs text-[var(--tertiary)] font-medium">{progress}%</span>
                   </div>
                 )}
               </div>
 
-              {/* Info */}
-              <div className="text-[10px] text-[var(--text-secondary)] flex items-center gap-3">
-                <span>🖥 Procesando en tu computadora</span>
-                <span>·</span>
-                <span>{browserClipCount} clips</span>
-                <span>·</span>
-                <span>{resolution}</span>
-              </div>
-
-              <button
-                onClick={handleBrowserCancel}
-                className="mt-1 text-sm text-[var(--error)] hover:text-[var(--error-hover)] transition-colors"
-              >
+              <button onClick={handleCancel} className="mt-1 text-sm text-[var(--error)] hover:text-[var(--error-hover)] transition-colors">
                 Cancelar
               </button>
             </div>
 
-          ) : exportMethod === "browser" && browserPhase === "done" && browserDownloadUrl ? (
-            /* ── Browser Export Complete ── */
+          ) : phase === "done" && localDownloadUrl ? (
+            /* ── Done ── */
             <div className="flex flex-col items-center gap-4 py-4 animate-in zoom-in-95">
               <div className="w-16 h-16 rounded-full bg-[var(--success-muted)] text-[var(--success)] flex items-center justify-center mb-2">
                 <CheckCircleIcon className="w-8 h-8" />
               </div>
               <h4 className="text-lg font-semibold text-white">¡Exportación completa!</h4>
-              <p className="text-xs text-[var(--text-secondary)]">
-                {browserClipCount} clips con crossfade · {resolution} · {formatTime(browserElapsed)}
-              </p>
+              <p className="text-xs text-[var(--text-secondary)]">{detailMsg || `${clipCount} clips · ${resolution} · ${formatTime(elapsed)}`}</p>
 
-              <a
-                onClick={(e) => { e.preventDefault(); handleBrowserDownload() }}
-                href="#"
+              <button
+                onClick={handleDownload}
                 className="mt-2 w-full flex items-center justify-center gap-2 px-6 py-3 bg-[var(--tertiary)] hover:bg-[var(--tertiary-hover)] text-white rounded-lg font-medium transition-all shadow-lg cursor-pointer"
               >
                 <DownloadIcon className="w-4 h-4" />
                 Descargar MP4
-              </a>
-
-              {/* Preview */}
-              <video
-                src={browserDownloadUrl}
-                controls
-                className="w-full rounded-lg border border-[var(--border-default)] mt-1"
-                style={{ maxHeight: "180px" }}
-              />
-
-              <button onClick={handleClose} className="text-sm text-[var(--text-secondary)] hover:text-white">
-                Cerrar
               </button>
+
+              <video src={localDownloadUrl} controls className="w-full rounded-lg border border-[var(--border-default)] mt-1" style={{ maxHeight: "200px" }} />
+
+              <button onClick={handleClose} className="text-sm text-[var(--text-secondary)] hover:text-white">Cerrar</button>
             </div>
 
-          ) : exportMethod === "browser" && browserPhase === "error" ? (
-            /* ── Browser Export Error ── */
+          ) : phase === "error" ? (
+            /* ── Error ── */
             <div className="flex flex-col items-center gap-4 py-4">
               <div className="w-16 h-16 rounded-full bg-[var(--error-muted)] text-[var(--error)] flex items-center justify-center mb-2">
                 <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M12 8v4" />
-                  <path d="M12 16h.01" />
+                  <circle cx="12" cy="12" r="10" /><path d="M12 8v4" /><path d="M12 16h.01" />
                 </svg>
               </div>
-              <h4 className="text-lg font-semibold text-white">Error en exportación</h4>
-              <p className="text-sm text-[var(--text-tertiary)] text-center max-w-sm">{browserError}</p>
+              <h4 className="text-lg font-semibold text-white">Error en la exportación</h4>
+              <p className="text-sm text-[var(--text-tertiary)] text-center max-w-sm break-words">{errorMsg}</p>
               <div className="flex gap-3 mt-2">
-                <button
-                  onClick={() => { setBrowserPhase("idle"); setBrowserError("") }}
-                  className="px-4 py-2 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-white rounded-lg text-sm transition-colors"
-                >
+                <button onClick={() => { setPhase("idle"); setErrorMsg("") }} className="px-4 py-2 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-white rounded-lg text-sm transition-colors">
                   Volver
                 </button>
-                <button
-                  onClick={handleBrowserExport}
-                  className="px-4 py-2 bg-[var(--tertiary)] hover:bg-[var(--tertiary-hover)] text-white rounded-lg text-sm transition-colors"
-                >
+                <button onClick={handleExport} className="px-4 py-2 bg-[var(--tertiary)] hover:bg-[var(--tertiary-hover)] text-white rounded-lg text-sm transition-colors">
                   Reintentar
                 </button>
               </div>
             </div>
 
-          /* ════════════════════════════════════════════════
-             SERVER EXPORT — Active states (unchanged logic)
-             ════════════════════════════════════════════════ */
-          ) : ffmpegError ? (
+          /* ── Server export fallback (no chapterId) ── */
+          ) : !chapterId && ffmpegError ? (
             <div className="flex flex-col items-center gap-4 py-4">
-              <div className="w-16 h-16 rounded-full bg-[var(--error-muted)] text-[var(--error)] flex items-center justify-center mb-2">
-                <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M12 8v4" />
-                  <path d="M12 16h.01" />
-                </svg>
-              </div>
-              <h4 className="text-lg font-semibold text-white">Export Unavailable</h4>
+              <h4 className="text-lg font-semibold text-white">Export no disponible</h4>
               <p className="text-sm text-[var(--text-tertiary)] text-center max-w-sm">{ffmpegError}</p>
-              <div className="flex gap-3 mt-2">
-                <button onClick={handleClose} className="px-4 py-2 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-white rounded-lg text-sm transition-colors">
-                  Close
-                </button>
-                <button onClick={() => { setIsInitializing(true); onStartExport(resolution) }} className="px-4 py-2 bg-[var(--tertiary)] hover:bg-[var(--tertiary-hover)] text-white rounded-lg text-sm transition-colors">
-                  Try Again
-                </button>
-              </div>
+              <button onClick={handleClose} className="px-4 py-2 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-white rounded-lg text-sm transition-colors">Cerrar</button>
             </div>
 
-          ) : downloadUrl ? (
+          ) : !chapterId && downloadUrl ? (
             <div className="flex flex-col items-center gap-4 py-4 animate-in zoom-in-95">
               <div className="w-16 h-16 rounded-full bg-[var(--success-muted)] text-[var(--success)] flex items-center justify-center mb-2">
                 <CheckCircleIcon className="w-8 h-8" />
               </div>
-              <h4 className="text-lg font-semibold text-white">Export Complete!</h4>
+              <h4 className="text-lg font-semibold text-white">¡Exportación completa!</h4>
               <a href={downloadUrl} download="project_export.mp4" className="mt-2 w-full flex items-center justify-center gap-2 px-6 py-3 bg-[var(--tertiary)] hover:bg-[var(--tertiary-hover)] text-white rounded-lg font-medium transition-all shadow-lg">
-                <DownloadIcon className="w-4 h-4" />
-                Download MP4
+                <DownloadIcon className="w-4 h-4" />Descargar MP4
               </a>
-              <button onClick={handleClose} className="text-sm text-[var(--text-secondary)] hover:text-white">Close</button>
+              <button onClick={handleClose} className="text-sm text-[var(--text-secondary)] hover:text-white">Cerrar</button>
             </div>
 
-          ) : isExporting || isInitializing ? (
+          ) : !chapterId && isExporting ? (
             <div className="flex flex-col gap-5 py-4">
-              <StepIndicator exportPhase={exportPhase} />
               <div className="text-center">
-                <p className="text-sm font-medium text-white">{phaseInfo.label}</p>
-                <p className="text-xs text-[var(--text-secondary)] mt-1">{phaseInfo.detail}</p>
+                <p className="text-sm font-medium text-white">Exportando...</p>
               </div>
-              <div className="space-y-2">
-                <div className="h-2 w-full bg-[var(--surface-2)] rounded-full overflow-hidden">
-                  {exportPhase === "init" ? (
-                    <div className="h-full bg-[var(--tertiary-muted)] w-full animate-pulse" />
-                  ) : (
-                    <div className="h-full bg-[var(--tertiary)] transition-all duration-300" style={{ width: `${exportProgress}%` }} />
-                  )}
-                </div>
-                {phaseInfo.showProgress && (
-                  <div className="flex justify-end">
-                    <span className="text-xs text-[var(--tertiary)] font-medium">{Math.round(exportProgress)}%</span>
-                  </div>
-                )}
+              <div className="h-2 w-full bg-[var(--surface-2)] rounded-full overflow-hidden">
+                <div className="h-full bg-[var(--tertiary)] transition-all duration-300" style={{ width: `${exportProgress}%` }} />
               </div>
-              <button onClick={onCancel} className="mt-1 text-sm text-[var(--error)] hover:text-[var(--error-hover)] transition-colors">
-                Cancel Export
-              </button>
+              <button onClick={onCancel} className="mt-1 text-sm text-[var(--error)] hover:text-[var(--error-hover)] transition-colors">Cancelar</button>
             </div>
 
           ) : (
-            /* ════════════════════════════════════════════════
-               PRE-EXPORT — Resolution + Method selection
-               ════════════════════════════════════════════════ */
+            /* ── Pre-export ── */
             <div className="flex flex-col gap-5">
-              {/* Preview warning */}
-              {!hasRenderedPreview && (
-                <div className="p-4 rounded-lg bg-[var(--warning-muted)] border border-[var(--warning)]/30 flex items-start gap-3">
-                  <svg className="w-5 h-5 text-[var(--warning)] shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="12" y1="8" x2="12" y2="12" />
-                    <line x1="12" y1="16" x2="12.01" y2="16" />
-                  </svg>
+              {chapterProjectName && (
+                <div className="flex items-center justify-between text-[11px] p-3 rounded-lg bg-[var(--surface-1)] border border-[var(--border-default)]">
                   <div>
-                    <p className="text-sm text-[var(--warning)] font-medium">Preview no renderizado</p>
-                    <p className="text-xs text-[var(--warning)]/80 mt-1">
-                      Puedes usar <span className="font-semibold">Render</span> en el timeline para previsualizar antes de exportar.
-                    </p>
+                    <div className="text-white font-medium">{chapterProjectName}</div>
+                    <div className="text-[var(--text-secondary)]">Cap {chapterNumber}: {chapterTitle}</div>
                   </div>
                 </div>
               )}
 
-              {hasRenderedPreview && resolution === "720p" && (
-                <div className="p-4 rounded-lg bg-[var(--success-muted)] border border-[var(--success)]/30 flex items-start gap-3">
-                  <CheckCircleIcon className="w-5 h-5 text-[var(--success)] shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm text-[var(--success)] font-medium">Listo para export rápido</p>
-                    <p className="text-xs text-[var(--success)]/80 mt-1">
-                      Tu preview renderizado se reutilizará. El export será instantáneo.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Resolution */}
               <div className="space-y-3">
                 <label className="text-xs font-bold text-[var(--text-secondary)] uppercase">Calidad</label>
-                <ResolutionSelector
-                  resolution={resolution}
-                  onSelect={handleResolutionChange}
-                  hasRenderedPreview={hasRenderedPreview}
-                />
+                <ResolutionSelector resolution={resolution} onSelect={setResolution} />
               </div>
 
-              {/* Export Method — only show if browser export is available */}
-              {hasBrowserExport && (
-                <div className="space-y-3">
-                  <label className="text-xs font-bold text-[var(--text-secondary)] uppercase">Método</label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      onClick={() => setExportMethod("browser")}
-                      className={`p-3 rounded-lg border text-left transition-all ${
-                        exportMethod === "browser"
-                          ? "bg-cyan-500/10 border-cyan-500"
-                          : "bg-[var(--surface-1)] border-[var(--border-default)] hover:border-[var(--border-emphasis)]"
-                      }`}
-                    >
-                      <div className={`text-sm font-medium ${exportMethod === "browser" ? "text-cyan-400" : "text-[var(--text-primary)]"}`}>
-                        💻 En mi PC
-                      </div>
-                      <div className="text-[10px] text-[var(--text-secondary)] mt-1">
-                        Crossfade real · Sin servidor
-                      </div>
-                    </button>
-                    <button
-                      onClick={() => setExportMethod("server")}
-                      className={`p-3 rounded-lg border text-left transition-all ${
-                        exportMethod === "server"
-                          ? "bg-[var(--tertiary-muted)] border-[var(--tertiary)]"
-                          : "bg-[var(--surface-1)] border-[var(--border-default)] hover:border-[var(--border-emphasis)]"
-                      }`}
-                    >
-                      <div className={`text-sm font-medium ${exportMethod === "server" ? "text-[var(--tertiary)]" : "text-[var(--text-primary)]"}`}>
-                        ☁️ Servidor
-                      </div>
-                      <div className="text-[10px] text-[var(--text-secondary)] mt-1">
-                        Render procesa · Concat simple
-                      </div>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Chapter info (browser export) */}
-              {exportMethod === "browser" && chapterProjectName && (
-                <div className="flex items-center justify-between text-[10px] p-2.5 rounded-lg bg-[var(--surface-1)] border border-[var(--border-default)]">
-                  <span className="text-[var(--text-secondary)]">
-                    {chapterProjectName} · Cap {chapterNumber}: {chapterTitle}
-                  </span>
-                  <span className="text-cyan-400 font-medium">FFmpeg.wasm</span>
-                </div>
-              )}
-
-              {/* Start button */}
               <button
                 onClick={handleStartClick}
-                className={`w-full py-3 font-bold rounded-lg transition-colors shadow-lg mt-1 flex items-center justify-center gap-2 ${
-                  exportMethod === "browser"
-                    ? "bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white"
-                    : "bg-white text-black hover:bg-gray-200"
-                }`}
+                className="w-full py-3 bg-white text-black font-bold rounded-lg hover:bg-gray-200 transition-colors shadow-lg mt-2 flex items-center justify-center gap-2"
               >
-                {exportMethod === "browser"
-                  ? "💻 Exportar en mi PC"
-                  : willReusePreview
-                    ? "Export Now"
-                    : "Start Export"
-                }
+                Exportar
               </button>
             </div>
           )}
