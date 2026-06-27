@@ -31,19 +31,17 @@ interface ExportModalProps {
   chapterTitle?: string
 }
 
-type ExportPhase = "idle" | "loading" | "downloading" | "normalizing" | "merging" | "done" | "error"
+type ExportPhase = "idle" | "loading" | "downloading" | "processing" | "finalizing" | "done" | "error"
 
 interface SceneClip {
   index: number
   videoUrl: string
   duration: number
   volume: number
-  actualDuration?: number // measured after normalization
 }
 
-const XFADE_DURATION = 1
 const TARGET_FPS = 30
-const BATCH_SIZE = 10 // xfade in groups of 10 for reliability
+const FADE_DURATION = 0.7 // seconds of fade-in/fade-out per clip
 
 /* ── Helpers ── */
 const formatTime = (sec: number) => {
@@ -75,18 +73,14 @@ const ResolutionSelector = memo(function ResolutionSelector({
         onClick={() => onSelect("1080p")}
         className={`p-3 rounded-lg border text-left transition-all ${resolution === "1080p" ? "bg-[var(--tertiary-muted)] border-[var(--tertiary)]" : "bg-[var(--surface-1)] border-[var(--border-default)] hover:border-[var(--border-emphasis)]"}`}
       >
-        <div className={`text-sm font-medium ${resolution === "1080p" ? "text-[var(--tertiary)]" : "text-[var(--text-primary)]"}`}>
-          1080p
-        </div>
+        <div className={`text-sm font-medium ${resolution === "1080p" ? "text-[var(--tertiary)]" : "text-[var(--text-primary)]"}`}>1080p</div>
         <div className="text-[10px] text-[var(--text-secondary)] mt-1">1920×1080 · Mejor calidad</div>
       </button>
       <button
         onClick={() => onSelect("720p")}
         className={`p-3 rounded-lg border text-left transition-all ${resolution === "720p" ? "bg-[var(--tertiary-muted)] border-[var(--tertiary)]" : "bg-[var(--surface-1)] border-[var(--border-default)] hover:border-[var(--border-emphasis)]"}`}
       >
-        <div className={`text-sm font-medium ${resolution === "720p" ? "text-[var(--tertiary)]" : "text-[var(--text-primary)]"}`}>
-          720p
-        </div>
+        <div className={`text-sm font-medium ${resolution === "720p" ? "text-[var(--tertiary)]" : "text-[var(--text-primary)]"}`}>720p</div>
         <div className="text-[10px] text-[var(--text-secondary)] mt-1">1280×720 · Más rápido</div>
       </button>
     </div>
@@ -118,7 +112,6 @@ export const ExportModal = memo(function ExportModal({
   const [phase, setPhase] = useState<ExportPhase>("idle")
   const [progress, setProgress] = useState(0)
   const [statusMsg, setStatusMsg] = useState("")
-  const [detailMsg, setDetailMsg] = useState("")
   const [errorMsg, setErrorMsg] = useState("")
   const [localDownloadUrl, setLocalDownloadUrl] = useState<string | null>(null)
   const [elapsed, setElapsed] = useState(0)
@@ -127,23 +120,21 @@ export const ExportModal = memo(function ExportModal({
   const cancelledRef = useRef(false)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const startTimeRef = useRef(0)
-  const detectedDurationRef = useRef<number>(0)
+  const lastErrorRef = useRef<string>("")
 
   useEffect(() => {
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [])
 
   useEffect(() => {
-    if (isOpen && phase !== "downloading" && phase !== "normalizing" && phase !== "merging" && phase !== "loading") {
+    if (isOpen && phase !== "downloading" && phase !== "processing" && phase !== "finalizing" && phase !== "loading") {
       setPhase("idle")
       setProgress(0)
       setStatusMsg("")
-      setDetailMsg("")
       setErrorMsg("")
     }
   }, [isOpen])
 
-  /* ── Timer ── */
   const startTimer = useCallback(() => {
     startTimeRef.current = Date.now()
     setElapsed(0)
@@ -161,15 +152,10 @@ export const ExportModal = memo(function ExportModal({
   const loadFFmpeg = async (): Promise<FFmpeg> => {
     if (ffmpegRef.current) return ffmpegRef.current
     const ffmpeg = new FFmpeg()
-    // Capture duration from FFmpeg logs
     ffmpeg.on("log", ({ message }) => {
-      const durMatch = message.match(/Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/)
-      if (durMatch) {
-        const h = parseInt(durMatch[1])
-        const m = parseInt(durMatch[2])
-        const s = parseInt(durMatch[3])
-        const cs = parseInt(durMatch[4])
-        detectedDurationRef.current = h * 3600 + m * 60 + s + cs / 100
+      // Capture last error for debugging
+      if (message.toLowerCase().includes("error") || message.toLowerCase().includes("invalid")) {
+        lastErrorRef.current = message
       }
     })
     const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd"
@@ -181,7 +167,7 @@ export const ExportModal = memo(function ExportModal({
     return ffmpeg
   }
 
-  /* ── Fetch scene clips from backend ── */
+  /* ── Fetch scene clips ── */
   const fetchSceneClips = async (): Promise<SceneClip[]> => {
     if (!chapterId) throw new Error("No chapter loaded")
     const data = await apiFetch(`/api/image-studio/chapters/${chapterId}/video-progress`)
@@ -204,122 +190,17 @@ export const ExportModal = memo(function ExportModal({
     return clips
   }
 
-  /* ── Probe actual duration of a file ── */
-  const probeFileDuration = async (ffmpeg: FFmpeg, filename: string): Promise<number> => {
-    detectedDurationRef.current = 0
-    try {
-      await ffmpeg.exec(["-i", filename, "-f", "null", "-"])
-    } catch {
-      // ffmpeg returns non-zero when writing to null, but we got the duration from logs
-    }
-    return detectedDurationRef.current
-  }
-
-  /* ── xfade a list of files, return output filename ── */
-  const xfadeFiles = async (
-    ffmpeg: FFmpeg,
-    inputFiles: string[],
-    durations: number[],
-    outputFile: string,
-  ): Promise<boolean> => {
-    if (inputFiles.length === 0) return false
-
-    if (inputFiles.length === 1) {
-      // Single file — just copy
-      const data = await ffmpeg.readFile(inputFiles[0])
-      await ffmpeg.writeFile(outputFile, data)
-      return true
-    }
-
-    // Build input args
-    const inputArgs: string[] = []
-    for (const f of inputFiles) {
-      inputArgs.push("-i", f)
-    }
-
-    // Build xfade filter chain
-    let videoFilter = ""
-    let audioFilter = ""
-    let cumulativeOffset = 0
-    const n = inputFiles.length
-
-    for (let i = 0; i < n - 1; i++) {
-      const clipDur = durations[i]
-      // Ensure offset is positive and valid
-      const offset = Math.max(0, cumulativeOffset + clipDur - XFADE_DURATION)
-      const inLabel = i === 0 ? `[${i}:v]` : `[v${i}]`
-      const nextLabel = `[${i + 1}:v]`
-      const outLabel = i === n - 2 ? "[vout]" : `[v${i + 1}]`
-
-      videoFilter += `${inLabel}${nextLabel}xfade=transition=fade:duration=${XFADE_DURATION}:offset=${offset.toFixed(3)}${outLabel}`
-      if (i < n - 2) videoFilter += ";"
-
-      const aIn = i === 0 ? `[${i}:a]` : `[a${i}]`
-      const aNext = `[${i + 1}:a]`
-      const aOut = i === n - 2 ? "[aout]" : `[a${i + 1}]`
-
-      audioFilter += `${aIn}${aNext}acrossfade=d=${XFADE_DURATION}:c1=tri:c2=tri${aOut}`
-      if (i < n - 2) audioFilter += ";"
-
-      cumulativeOffset = offset
-    }
-
-    const filterComplex = videoFilter + ";" + audioFilter
-
-    try {
-      await ffmpeg.exec([
-        ...inputArgs,
-        "-filter_complex", filterComplex,
-        "-map", "[vout]", "-map", "[aout]",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-        "-c:a", "aac", "-b:a", "128k",
-        "-movflags", "+faststart",
-        "-y", outputFile,
-      ])
-
-      // Verify output exists and has content
-      const result = await ffmpeg.readFile(outputFile)
-      if (result.length < 1000) {
-        console.warn(`xfade output ${outputFile} too small (${result.length} bytes), likely corrupted`)
-        return false
-      }
-      return true
-    } catch (err) {
-      console.warn(`xfade failed for ${outputFile}:`, err)
-      return false
-    }
-  }
-
-  /* ── Concat fallback (no transitions, just join) ── */
-  const concatFiles = async (
-    ffmpeg: FFmpeg,
-    inputFiles: string[],
-    outputFile: string,
-  ): Promise<void> => {
-    let concatList = ""
-    for (const f of inputFiles) {
-      concatList += `file '${f}'\n`
-    }
-    const encoder = new TextEncoder()
-    await ffmpeg.writeFile("concat_list.txt", encoder.encode(concatList))
-
-    await ffmpeg.exec([
-      "-f", "concat", "-safe", "0", "-i", "concat_list.txt",
-      "-c", "copy",
-      "-movflags", "+faststart",
-      "-y", outputFile,
-    ])
-  }
-
   /* ══════════════════════════════════════
      EXPORT FLOW
+     Strategy: normalize each clip with fade-in/out baked in,
+     then instant concat with -c copy (no re-encoding in merge)
      ══════════════════════════════════════ */
   const handleExport = useCallback(async () => {
     cancelledRef.current = false
+    lastErrorRef.current = ""
     setPhase("loading")
     setProgress(0)
     setStatusMsg("Preparando...")
-    setDetailMsg("")
     setErrorMsg("")
     setLocalDownloadUrl(null)
     startTimer()
@@ -328,7 +209,6 @@ export const ExportModal = memo(function ExportModal({
       const ffmpeg = await loadFFmpeg()
       if (cancelledRef.current) { stopTimer(); return }
 
-      // Fetch scenes
       setStatusMsg("Obteniendo escenas...")
       const clips = await fetchSceneClips()
       setClipCount(clips.length)
@@ -338,186 +218,195 @@ export const ExportModal = memo(function ExportModal({
       const th = resolution === "1080p" ? 1080 : 720
 
       // ════════════════════════════════════════
-      // PHASE 1: Download all clips
+      // PHASE 1: Download + Process each clip
+      // Download → normalize → fade → delete input → next
+      // This keeps memory low (only 1 input + 1 output at a time)
       // ════════════════════════════════════════
-      setPhase("downloading")
+      setPhase("processing")
+      setProgress(0)
+
       for (let i = 0; i < clips.length; i++) {
         if (cancelledRef.current) { stopTimer(); return }
-        setStatusMsg(`Descargando clip ${i + 1} de ${clips.length}`)
-        setProgress(Math.round((i / clips.length) * 100))
+        setStatusMsg(`Clip ${i + 1} de ${clips.length} — descargando...`)
+        setProgress(Math.round((i / clips.length) * 95))
 
+        // Download
         const response = await fetch(clips[i].videoUrl)
         if (!response.ok) throw new Error(`Error descargando clip ${i + 1}: HTTP ${response.status}`)
         const data = new Uint8Array(await response.arrayBuffer())
         await ffmpeg.writeFile(`input_${i}.mp4`, data)
-      }
 
-      if (cancelledRef.current) { stopTimer(); return }
-
-      // ════════════════════════════════════════
-      // PHASE 2: Normalize + measure actual durations
-      // ════════════════════════════════════════
-      setPhase("normalizing")
-      setProgress(0)
-
-      const actualDurations: number[] = []
-
-      for (let i = 0; i < clips.length; i++) {
-        if (cancelledRef.current) { stopTimer(); return }
-        setStatusMsg(`Procesando clip ${i + 1} de ${clips.length}`)
-        setProgress(Math.round((i / clips.length) * 100))
+        // Normalize with fade-in/fade-out baked in
+        setStatusMsg(`Clip ${i + 1} de ${clips.length} — procesando...`)
 
         const vol = clips[i].volume / 100
-        const vf = `fps=${TARGET_FPS},scale=${tw}:${th}:force_original_aspect_ratio=decrease,pad=${tw}:${th}:(ow-iw)/2:(oh-ih)/2,setsar=1`
+        const isFirst = i === 0
+        const isLast = i === clips.length - 1
+
+        // Build video filter: scale + fps + fade
+        let vfParts = [
+          `fps=${TARGET_FPS}`,
+          `scale=${tw}:${th}:force_original_aspect_ratio=decrease`,
+          `pad=${tw}:${th}:(ow-iw)/2:(oh-ih)/2`,
+          `setsar=1`,
+        ]
+        // Add fade-in to first clip or all clips, fade-out to last clip or all clips
+        // For smooth transitions between clips: every clip gets fade-out, every clip gets fade-in
+        // Exception: first clip no fade-in, last clip no fade-out (video starts/ends clean)
+        if (!isFirst) {
+          vfParts.push(`fade=t=in:st=0:d=${FADE_DURATION}`)
+        }
+        if (!isLast) {
+          // fade-out needs to know duration — use a very large start time and let ffmpeg figure it out
+          // Actually, we need real duration. Use a trick: fade=t=out:d=FADE:st=999 won't work.
+          // Instead, use the 'reverse fade' approach or just apply to all clips
+          vfParts.push(`fade=t=out:d=${FADE_DURATION}:st=99999`)
+          // This won't work because st=99999 is past end. Better approach:
+        }
+
+        // Simpler: apply fade-in and fade-out to ALL clips using the 'fade' filter
+        // fade=t=out needs st (start time). We don't know exact duration before encoding.
+        // Solution: use expression-based start time
+        // Actually the simplest reliable approach: apply fade to all clips
+        // fade=in:0:FRAMES for fade-in, fade=out:0:FRAMES with start at end
+        // In newer ffmpeg: fade=t=out:st='if(gte(t,duration-0.7),1,0)' doesn't work
+        // 
+        // BEST approach: use -sseof for fade-out timing? No.
+        // ACTUALLY: we can use the 'afade' and 'fade' with negative times won't work.
+        //
+        // The reliable way: just apply fade-in to all and fade-out to all.
+        // For fade-out, we DON'T specify st — we specify duration from the END.
+        // But fade filter requires st (start time in seconds).
+        // 
+        // Workaround: use a two-pass approach or just trust the duration from API.
+        // Let's use API duration. If clip is 8s, fade-out starts at 8 - FADE_DURATION = 7.3
+
+        // Reset vfParts with proper fade
+        const clipDur = clips[i].duration
+        vfParts = [
+          `fps=${TARGET_FPS}`,
+          `scale=${tw}:${th}:force_original_aspect_ratio=decrease`,
+          `pad=${tw}:${th}:(ow-iw)/2:(oh-ih)/2`,
+          `setsar=1`,
+        ]
+        if (!isFirst) {
+          vfParts.push(`fade=t=in:st=0:d=${FADE_DURATION}`)
+        }
+        if (!isLast) {
+          const fadeOutStart = Math.max(0, clipDur - FADE_DURATION)
+          vfParts.push(`fade=t=out:st=${fadeOutStart.toFixed(2)}:d=${FADE_DURATION}`)
+        }
+
+        const vf = vfParts.join(",")
+
+        // Build audio filter
+        let af = `volume=${vol.toFixed(2)}`
+        if (!isFirst) {
+          af += `,afade=t=in:st=0:d=${FADE_DURATION}`
+        }
+        if (!isLast) {
+          const aFadeOutStart = Math.max(0, clipDur - FADE_DURATION)
+          af += `,afade=t=out:st=${aFadeOutStart.toFixed(2)}:d=${FADE_DURATION}`
+        }
 
         // Try with audio
-        let normOk = false
+        let ok = false
         try {
           await ffmpeg.exec([
             "-i", `input_${i}.mp4`,
             "-vf", vf,
-            "-af", `volume=${vol.toFixed(2)}`,
+            "-af", af,
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
             "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
             "-r", String(TARGET_FPS),
-            "-y", `norm_${i}.mp4`,
+            "-y", `clip_${i}.mp4`,
           ])
-          try { await ffmpeg.readFile(`norm_${i}.mp4`); normOk = true } catch { normOk = false }
-        } catch { normOk = false }
+          // Verify output
+          const check = await ffmpeg.readFile(`clip_${i}.mp4`)
+          if (check.length > 500) ok = true
+        } catch { ok = false }
 
-        if (!normOk) {
-          // No audio — add silent audio
-          await ffmpeg.exec([
-            "-i", `input_${i}.mp4`,
-            "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-            "-vf", vf,
-            "-map", "0:v", "-map", "1:a",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-            "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
-            "-r", String(TARGET_FPS),
-            "-shortest",
-            "-y", `norm_${i}.mp4`,
-          ])
-        }
-
-        // Free input
-        try { await ffmpeg.deleteFile(`input_${i}.mp4`) } catch {}
-
-        // Measure actual duration
-        const dur = await probeFileDuration(ffmpeg, `norm_${i}.mp4`)
-        actualDurations.push(dur > 0 ? dur : clips[i].duration)
-        setDetailMsg(`Clip ${i + 1}: ${dur.toFixed(1)}s real`)
-      }
-
-      if (cancelledRef.current) { stopTimer(); return }
-
-      // ════════════════════════════════════════
-      // PHASE 3: Merge with BATCHED xfade
-      // ════════════════════════════════════════
-      setPhase("merging")
-      setProgress(0)
-
-      // Split into batches
-      const numBatches = Math.ceil(clips.length / BATCH_SIZE)
-      const batchFiles: string[] = []
-      const batchDurations: number[] = []
-
-      for (let b = 0; b < numBatches; b++) {
-        if (cancelledRef.current) { stopTimer(); return }
-        const startIdx = b * BATCH_SIZE
-        const endIdx = Math.min(startIdx + BATCH_SIZE, clips.length)
-        const batchClipFiles = []
-        const batchClipDurations = []
-
-        for (let i = startIdx; i < endIdx; i++) {
-          batchClipFiles.push(`norm_${i}.mp4`)
-          batchClipDurations.push(actualDurations[i])
-        }
-
-        const batchFile = `batch_${b}.mp4`
-        setStatusMsg(`Uniendo lote ${b + 1} de ${numBatches} (clips ${startIdx + 1}-${endIdx})`)
-        setProgress(Math.round((b / numBatches) * 80))
-
-        if (batchClipFiles.length === 1) {
-          // Single clip batch — just rename
-          const d = await ffmpeg.readFile(batchClipFiles[0])
-          await ffmpeg.writeFile(batchFile, d)
-        } else {
-          const xfadeOk = await xfadeFiles(ffmpeg, batchClipFiles, batchClipDurations, batchFile)
-          if (!xfadeOk) {
-            // Fallback: concat without transitions
-            setDetailMsg(`Lote ${b + 1}: usando concat simple`)
-            await concatFiles(ffmpeg, batchClipFiles, batchFile)
+        if (!ok) {
+          // Retry without audio filter (clip may have no audio)
+          try {
+            await ffmpeg.exec([
+              "-i", `input_${i}.mp4`,
+              "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+              "-vf", vf,
+              "-map", "0:v", "-map", "1:a",
+              "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+              "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+              "-r", String(TARGET_FPS),
+              "-shortest",
+              "-y", `clip_${i}.mp4`,
+            ])
+          } catch (e2) {
+            const errMsg = e2 instanceof Error ? e2.message : String(e2)
+            throw new Error(`Clip ${i + 1} falló: ${errMsg}. FFmpeg: ${lastErrorRef.current}`)
           }
         }
 
-        // Clean up normalized clips in this batch
-        for (const f of batchClipFiles) {
-          try { await ffmpeg.deleteFile(f) } catch {}
-        }
-
-        // Measure batch duration for next stage
-        const batchDur = await probeFileDuration(ffmpeg, batchFile)
-        batchFiles.push(batchFile)
-        batchDurations.push(batchDur > 0 ? batchDur : batchClipDurations.reduce((a, b) => a + b, 0) - (batchClipDurations.length - 1) * XFADE_DURATION)
-      }
-
-      if (cancelledRef.current) { stopTimer(); return }
-
-      // Final merge: xfade the batches together
-      if (batchFiles.length === 1) {
-        setStatusMsg("Finalizando video...")
-        const d = await ffmpeg.readFile(batchFiles[0])
-        await ffmpeg.writeFile("output.mp4", d)
-        try { await ffmpeg.deleteFile(batchFiles[0]) } catch {}
-      } else {
-        setStatusMsg(`Uniendo ${batchFiles.length} lotes finales...`)
-        setProgress(85)
-
-        const finalXfadeOk = await xfadeFiles(ffmpeg, batchFiles, batchDurations, "output.mp4")
-        if (!finalXfadeOk) {
-          setDetailMsg("Usando concat simple para unión final")
-          await concatFiles(ffmpeg, batchFiles, "output.mp4")
-        }
-
-        // Clean up batch files
-        for (const f of batchFiles) {
-          try { await ffmpeg.deleteFile(f) } catch {}
-        }
+        // Free input immediately
+        try { await ffmpeg.deleteFile(`input_${i}.mp4`) } catch {}
       }
 
       if (cancelledRef.current) { stopTimer(); return }
 
       // ════════════════════════════════════════
-      // PHASE 4: Verify + download
+      // PHASE 2: Concat all clips (INSTANT — no re-encoding)
       // ════════════════════════════════════════
-      setStatusMsg("Verificando video...")
-      setProgress(95)
+      setPhase("finalizing")
+      setStatusMsg("Uniendo clips...")
+      setProgress(96)
+
+      // Write concat file list
+      let concatList = ""
+      for (let i = 0; i < clips.length; i++) {
+        concatList += `file 'clip_${i}.mp4'\n`
+      }
+      const encoder = new TextEncoder()
+      await ffmpeg.writeFile("concat.txt", encoder.encode(concatList))
+
+      // Concat with stream copy — FAST, no re-encoding
+      await ffmpeg.exec([
+        "-f", "concat", "-safe", "0", "-i", "concat.txt",
+        "-c", "copy",
+        "-movflags", "+faststart",
+        "-y", "output.mp4",
+      ])
+
+      // Clean up clips
+      for (let i = 0; i < clips.length; i++) {
+        try { await ffmpeg.deleteFile(`clip_${i}.mp4`) } catch {}
+      }
+      try { await ffmpeg.deleteFile("concat.txt") } catch {}
+
+      if (cancelledRef.current) { stopTimer(); return }
+
+      // ════════════════════════════════════════
+      // PHASE 3: Verify + serve download
+      // ════════════════════════════════════════
+      setStatusMsg("Verificando...")
+      setProgress(98)
 
       const outputData = await ffmpeg.readFile("output.mp4")
       if (outputData.length < 10000) {
-        throw new Error(`Archivo de salida demasiado pequeño (${outputData.length} bytes). El video no se generó correctamente.`)
-      }
-
-      // Check duration of final output
-      const finalDuration = await probeFileDuration(ffmpeg, "output.mp4")
-      if (finalDuration < 1) {
-        throw new Error("El video final tiene duración 0. Posible error de codificación.")
+        throw new Error(`Archivo muy pequeño (${(outputData.length / 1024).toFixed(0)} KB). FFmpeg: ${lastErrorRef.current}`)
       }
 
       const blob = new Blob([outputData], { type: "video/mp4" })
       const url = URL.createObjectURL(blob)
       try { await ffmpeg.deleteFile("output.mp4") } catch {}
 
+      const totalMB = (outputData.length / 1024 / 1024).toFixed(1)
       setLocalDownloadUrl(url)
       setPhase("done")
       setProgress(100)
-      setStatusMsg("¡Exportación completa!")
-      setDetailMsg(`${clips.length} clips · ${Math.round(finalDuration)}s · ${resolution}`)
+      setStatusMsg(`${clips.length} clips · ${resolution} · ${totalMB} MB`)
       stopTimer()
     } catch (err: unknown) {
       if (cancelledRef.current) { stopTimer(); return }
-      const msg = err instanceof Error ? err.message : "Error desconocido"
+      const msg = err instanceof Error ? err.message : `Error desconocido. FFmpeg: ${lastErrorRef.current}`
       console.error("Export error:", err)
       setPhase("error")
       setErrorMsg(msg)
@@ -530,7 +419,6 @@ export const ExportModal = memo(function ExportModal({
     setPhase("idle")
     setProgress(0)
     setStatusMsg("")
-    setDetailMsg("")
     stopTimer()
   }, [stopTimer])
 
@@ -546,7 +434,7 @@ export const ExportModal = memo(function ExportModal({
   }, [localDownloadUrl, chapterProjectName, chapterNumber])
 
   const handleClose = useCallback(() => {
-    if (phase === "downloading" || phase === "normalizing" || phase === "merging" || phase === "loading") {
+    if (phase === "downloading" || phase === "processing" || phase === "finalizing" || phase === "loading") {
       if (!confirm("¿Cancelar la exportación en progreso?")) return
       cancelledRef.current = true
       stopTimer()
@@ -565,7 +453,7 @@ export const ExportModal = memo(function ExportModal({
 
   if (!isOpen) return null
 
-  const isWorking = phase === "loading" || phase === "downloading" || phase === "normalizing" || phase === "merging"
+  const isWorking = phase === "loading" || phase === "downloading" || phase === "processing" || phase === "finalizing"
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -582,19 +470,17 @@ export const ExportModal = memo(function ExportModal({
 
         {/* Content */}
         <div className="p-6">
-          {/* ── Working ── */}
           {isWorking ? (
             <div className="flex flex-col gap-4 py-2">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-white">
                     {phase === "loading" && "Preparando..."}
-                    {phase === "downloading" && "Descargando clips..."}
-                    {phase === "normalizing" && "Procesando clips..."}
-                    {phase === "merging" && "Uniendo con transiciones..."}
+                    {phase === "downloading" && "Descargando..."}
+                    {phase === "processing" && "Procesando clips..."}
+                    {phase === "finalizing" && "Finalizando..."}
                   </p>
                   <p className="text-[10px] text-[var(--text-secondary)] mt-0.5">{statusMsg}</p>
-                  {detailMsg && <p className="text-[9px] text-[var(--text-muted)] mt-0.5">{detailMsg}</p>}
                 </div>
                 <span className="text-xs text-[var(--text-secondary)] font-mono">{formatTime(elapsed)}</span>
               </div>
@@ -621,13 +507,12 @@ export const ExportModal = memo(function ExportModal({
             </div>
 
           ) : phase === "done" && localDownloadUrl ? (
-            /* ── Done ── */
             <div className="flex flex-col items-center gap-4 py-4 animate-in zoom-in-95">
               <div className="w-16 h-16 rounded-full bg-[var(--success-muted)] text-[var(--success)] flex items-center justify-center mb-2">
                 <CheckCircleIcon className="w-8 h-8" />
               </div>
               <h4 className="text-lg font-semibold text-white">¡Exportación completa!</h4>
-              <p className="text-xs text-[var(--text-secondary)]">{detailMsg || `${clipCount} clips · ${resolution} · ${formatTime(elapsed)}`}</p>
+              <p className="text-xs text-[var(--text-secondary)]">{statusMsg} · {formatTime(elapsed)}</p>
 
               <button
                 onClick={handleDownload}
@@ -638,12 +523,10 @@ export const ExportModal = memo(function ExportModal({
               </button>
 
               <video src={localDownloadUrl} controls className="w-full rounded-lg border border-[var(--border-default)] mt-1" style={{ maxHeight: "200px" }} />
-
               <button onClick={handleClose} className="text-sm text-[var(--text-secondary)] hover:text-white">Cerrar</button>
             </div>
 
           ) : phase === "error" ? (
-            /* ── Error ── */
             <div className="flex flex-col items-center gap-4 py-4">
               <div className="w-16 h-16 rounded-full bg-[var(--error-muted)] text-[var(--error)] flex items-center justify-center mb-2">
                 <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -653,16 +536,11 @@ export const ExportModal = memo(function ExportModal({
               <h4 className="text-lg font-semibold text-white">Error en la exportación</h4>
               <p className="text-sm text-[var(--text-tertiary)] text-center max-w-sm break-words">{errorMsg}</p>
               <div className="flex gap-3 mt-2">
-                <button onClick={() => { setPhase("idle"); setErrorMsg("") }} className="px-4 py-2 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-white rounded-lg text-sm transition-colors">
-                  Volver
-                </button>
-                <button onClick={handleExport} className="px-4 py-2 bg-[var(--tertiary)] hover:bg-[var(--tertiary-hover)] text-white rounded-lg text-sm transition-colors">
-                  Reintentar
-                </button>
+                <button onClick={() => { setPhase("idle"); setErrorMsg("") }} className="px-4 py-2 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-white rounded-lg text-sm transition-colors">Volver</button>
+                <button onClick={handleExport} className="px-4 py-2 bg-[var(--tertiary)] hover:bg-[var(--tertiary-hover)] text-white rounded-lg text-sm transition-colors">Reintentar</button>
               </div>
             </div>
 
-          /* ── Server export fallback (no chapterId) ── */
           ) : !chapterId && ffmpegError ? (
             <div className="flex flex-col items-center gap-4 py-4">
               <h4 className="text-lg font-semibold text-white">Export no disponible</h4>
@@ -684,9 +562,7 @@ export const ExportModal = memo(function ExportModal({
 
           ) : !chapterId && isExporting ? (
             <div className="flex flex-col gap-5 py-4">
-              <div className="text-center">
-                <p className="text-sm font-medium text-white">Exportando...</p>
-              </div>
+              <div className="text-center"><p className="text-sm font-medium text-white">Exportando...</p></div>
               <div className="h-2 w-full bg-[var(--surface-2)] rounded-full overflow-hidden">
                 <div className="h-full bg-[var(--tertiary)] transition-all duration-300" style={{ width: `${exportProgress}%` }} />
               </div>
@@ -694,7 +570,6 @@ export const ExportModal = memo(function ExportModal({
             </div>
 
           ) : (
-            /* ── Pre-export ── */
             <div className="flex flex-col gap-5">
               {chapterProjectName && (
                 <div className="flex items-center justify-between text-[11px] p-3 rounded-lg bg-[var(--surface-1)] border border-[var(--border-default)]">
