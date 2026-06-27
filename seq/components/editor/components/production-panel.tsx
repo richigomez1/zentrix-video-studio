@@ -2,6 +2,7 @@
 
 import { memo, useState, useEffect, useCallback, useRef } from "react"
 import type { ZentrixEditorData, ZentrixScene } from "./zentrix-panel"
+import { BrowserExportDialog, type ExportableScene } from "./browser-export-dialog"
 
 const BACKEND_URL =
   typeof window !== "undefined" && window.location.hostname === "localhost"
@@ -617,6 +618,7 @@ export const ProductionPanel = memo(function ProductionPanel({
   const [isBatchGenerating, setIsBatchGenerating] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [exportUrl, setExportUrl] = useState<string | null>(null)
+  const [isBrowserExportOpen, setIsBrowserExportOpen] = useState(false)
   const [statusMsg, setStatusMsg] = useState("")
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
   const mountedRef = useRef(true)
@@ -1340,15 +1342,24 @@ export const ProductionPanel = memo(function ProductionPanel({
           )}
 
           <button
+            onClick={() => setIsBrowserExportOpen(true)}
+            disabled={doneCount === 0}
+            title="Exporta el video en tu computadora usando FFmpeg.wasm — sin usar el servidor"
+            className="px-4 py-2 text-xs font-medium text-white bg-cyan-600 hover:bg-cyan-500 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-2"
+          >
+            💻 Exportar en mi PC
+          </button>
+
+          <button
             onClick={handleExport}
             disabled={isExporting || doneCount === 0}
-            title="Combina todos los videos + audio en un solo archivo MP4 descargable"
+            title="Combina todos los videos + audio en el servidor (fallback)"
             className="px-4 py-2 text-xs font-medium text-white bg-green-600 hover:bg-green-500 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-2"
           >
             {isExporting ? (
               <><span className="animate-spin">📦</span> Exportando...</>
             ) : (
-              <>📦 Descargar Video Final</>
+              <>📦 Servidor (fallback)</>
             )}
           </button>
 
@@ -1406,6 +1417,24 @@ export const ProductionPanel = memo(function ProductionPanel({
           </div>
         )}
       </div>
+
+      {/* Browser Export Dialog */}
+      <BrowserExportDialog
+        isOpen={isBrowserExportOpen}
+        onClose={() => setIsBrowserExportOpen(false)}
+        scenes={scenes
+          .filter((s) => s.status === "done" && s.videoUrl)
+          .sort((a, b) => a.index - b.index)
+          .map((s) => ({
+            index: s.index,
+            videoUrl: s.videoUrl!,
+            volume: s.volume,
+            duration: s.duration,
+          }))}
+        projectName={chapterData.project_name || "Zentrix"}
+        chapterTitle={chapterData.chapter_title || ""}
+        chapterNumber={chapterData.chapter_number || 1}
+      />
     </div>
   )
 })
