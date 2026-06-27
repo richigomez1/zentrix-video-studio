@@ -1148,7 +1148,11 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
             downloadUrl={ffmpeg.downloadUrl}
             onCancel={handleCancelExport}
             hasRenderedPreview={!!ffmpeg.renderedPreviewUrl && !ffmpeg.isPreviewStale}
-            ffmpegError={ffmpeg.ffmpegError} // Added ffmpegError prop
+            ffmpegError={ffmpeg.ffmpegError}
+            chapterId={loadedChapterId}
+            chapterProjectName={loadedChapterData?.project_name}
+            chapterNumber={loadedChapterData?.chapter_number}
+            chapterTitle={loadedChapterData?.chapter_title}
           />
           <ShortcutsModal isOpen={isShortcutsOpen} onClose={() => setIsShortcutsOpen(false)} />
 
