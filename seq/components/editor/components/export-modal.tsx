@@ -2,6 +2,16 @@
 
 import { memo, useState, useEffect, useCallback, useRef } from "react"
 import { DownloadIcon, CheckCircleIcon } from "./icons"
+import {
+  subscribe,
+  getJobs,
+  addExportJob,
+  cancelJob,
+  downloadJob,
+  clearFinishedJobs,
+  type ExportJob,
+  type ExportClip,
+} from "./export-queue"
 
 /* ── Backend URL ── */
 const BACKEND_URL =
@@ -30,16 +40,6 @@ interface ExportModalProps {
   audioUrls?: string[]
 }
 
-type ExportPhase = "idle" | "loading" | "processing" | "finalizing" | "done" | "error"
-
-interface SceneClip {
-  index: number
-  videoUrl: string
-  duration: number
-  volume: number
-  meta?: { fps: number; width: number; height: number; codec_v: string; codec_a: string; has_audio: boolean } | null
-}
-
 /* ── Helpers ── */
 const formatTime = (sec: number) => {
   const m = Math.floor(sec / 60)
@@ -47,11 +47,16 @@ const formatTime = (sec: number) => {
   return `${m}:${s.toString().padStart(2, "0")}`
 }
 
+function elapsed(job: ExportJob): number {
+  if (!job.startedAt) return 0
+  return Math.floor((Date.now() - job.startedAt) / 1000)
+}
+
 async function apiFetch(path: string) {
   const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : ""
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (token) headers["Authorization"] = `Bearer ${token}`
-  const res = await fetch(BACKEND_URL + path, { headers })
+  const res = await fetch(`${BACKEND_URL}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
   if (!res.ok) throw new Error(`API error ${res.status}`)
   return res.json()
 }
@@ -84,10 +89,33 @@ const ResolutionSelector = memo(function ResolutionSelector({
   )
 })
 
+/* ── Status badge color ── */
+function statusColor(status: ExportJob["status"]): string {
+  switch (status) {
+    case "queued": return "text-[var(--text-secondary)]"
+    case "loading": case "processing": case "finalizing": return "text-[var(--tertiary)]"
+    case "done": return "text-[var(--success)]"
+    case "error": return "text-[var(--error)]"
+    default: return "text-[var(--text-secondary)]"
+  }
+}
+
+function statusLabel(status: ExportJob["status"]): string {
+  switch (status) {
+    case "queued": return "En cola"
+    case "loading": return "Preparando..."
+    case "processing": return "Procesando"
+    case "finalizing": return "Finalizando"
+    case "done": return "Completado"
+    case "error": return "Error"
+    default: return ""
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════
-   EXPORT MODAL — Web Worker powered
-   Export runs in a background thread. User can close modal
-   and keep editing. A floating bar shows progress.
+   EXPORT MODAL — Queue-powered
+   Exports run in a background Web Worker via a global queue.
+   User can queue multiple chapters and keep editing.
    ═══════════════════════════════════════════════════════════════ */
 export const ExportModal = memo(function ExportModal({
   isOpen,
@@ -107,227 +135,182 @@ export const ExportModal = memo(function ExportModal({
   audioUrls,
 }: ExportModalProps) {
   const [resolution, setResolution] = useState<"720p" | "1080p">("1080p")
-
-  /* ── Export State ── */
-  const [phase, setPhase] = useState<ExportPhase>("idle")
-  const [progress, setProgress] = useState(0)
-  const [statusMsg, setStatusMsg] = useState("")
   const [errorMsg, setErrorMsg] = useState("")
-  const [localDownloadUrl, setLocalDownloadUrl] = useState<string | null>(null)
-  const [elapsed, setElapsed] = useState(0)
-  const [clipCount, setClipCount] = useState(0)
-  const [totalMB, setTotalMB] = useState("")
-  const workerRef = useRef<Worker | null>(null)
-  const timerRef = useRef<NodeJS.Timeout | null>(null)
-  const startTimeRef = useRef(0)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // Cleanup
+  /* ── Subscribe to global queue state ── */
+  const [jobs, setJobs] = useState<ExportJob[]>(getJobs())
+  const [tick, setTick] = useState(0)
+
   useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-      workerRef.current?.terminate()
-    }
+    const unsub = subscribe(() => setJobs([...getJobs()]))
+    return unsub
   }, [])
 
-  const startTimer = useCallback(() => {
-    startTimeRef.current = Date.now()
-    setElapsed(0)
-    if (timerRef.current) clearInterval(timerRef.current)
-    timerRef.current = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000))
-    }, 1000)
-  }, [])
+  // Timer tick for elapsed time display
+  useEffect(() => {
+    const hasActive = jobs.some(
+      (j) => j.status === "loading" || j.status === "processing" || j.status === "finalizing"
+    )
+    if (!hasActive) return
+    const interval = setInterval(() => setTick((t) => t + 1), 1000)
+    return () => clearInterval(interval)
+  }, [jobs])
 
-  const stopTimer = useCallback(() => {
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
-  }, [])
-
-  /* ── Fetch scene clips from backend ── */
-  const fetchSceneClips = async (): Promise<SceneClip[]> => {
-    if (!chapterId) throw new Error("No chapter loaded")
-    const data = await apiFetch(`/api/image-studio/chapters/${chapterId}/video-progress`)
-    if (!data.videos || !Array.isArray(data.videos)) throw new Error("No videos found")
-    const clips: SceneClip[] = []
-    for (const vid of data.videos) {
-      const url = vid.veo_url || vid.kb_url
-      const status = vid.veo_url ? vid.veo_status : vid.kb_status
-      if (status === "done" && url) {
-        clips.push({
-          index: vid.segment_index,
-          videoUrl: url,
-          duration: vid.duration || 8,
-          volume: vid.volume ?? 30,
-          meta: vid.veo_url ? vid.veo_meta : vid.kb_meta,
-        })
-      }
-    }
-    clips.sort((a, b) => a.index - b.index)
-    if (clips.length === 0) throw new Error("No hay clips con video generado")
-    return clips
-  }
-
-  /* ── Start export via Web Worker ── */
+  /* ── Fetch clips and add to queue ── */
   const handleExport = useCallback(async () => {
-    setPhase("loading")
-    setProgress(0)
-    setStatusMsg("Preparando...")
+    if (!chapterId) return
     setErrorMsg("")
-    setLocalDownloadUrl(null)
-    setTotalMB("")
-    startTimer()
+    setIsSubmitting(true)
 
     try {
-      // Fetch scene data on main thread (needs localStorage auth)
-      const clips = await fetchSceneClips()
-      setClipCount(clips.length)
+      const data = await apiFetch(`/api/image-studio/chapters/${chapterId}/video-progress`)
+      if (!data.videos || !Array.isArray(data.videos)) throw new Error("No videos found")
 
-      // Create Web Worker
-      if (workerRef.current) workerRef.current.terminate()
-      const worker = new Worker(
-        new URL("./export-worker.ts", import.meta.url),
-        { type: "module" }
-      )
-      workerRef.current = worker
-
-      // Listen for worker messages
-      worker.onmessage = (e) => {
-        const msg = e.data
-
-        if (msg.type === "progress") {
-          setPhase(msg.phase as ExportPhase)
-          setProgress(msg.progress)
-          setStatusMsg(msg.status)
-        }
-
-        if (msg.type === "done") {
-          stopTimer()
-          const blob = new Blob([msg.buffer], { type: "video/mp4" })
-          const url = URL.createObjectURL(blob)
-          setLocalDownloadUrl(url)
-          setTotalMB(msg.totalMB)
-          setClipCount(msg.clipCount)
-          setPhase("done")
-          setProgress(100)
-          setStatusMsg(`${msg.clipCount} clips · ${resolution} · ${msg.totalMB} MB`)
-          worker.terminate()
-          workerRef.current = null
-        }
-
-        if (msg.type === "error") {
-          stopTimer()
-          setPhase("error")
-          setErrorMsg(msg.error)
-          worker.terminate()
-          workerRef.current = null
+      const clips: ExportClip[] = []
+      for (const vid of data.videos) {
+        const url = vid.veo_url || vid.kb_url
+        const status = vid.veo_url ? vid.veo_status : vid.kb_status
+        if (status === "done" && url) {
+          clips.push({
+            index: vid.segment_index,
+            videoUrl: url,
+            duration: vid.duration || 8,
+            volume: vid.volume ?? 30,
+            meta: vid.veo_url ? vid.veo_meta : vid.kb_meta,
+          })
         }
       }
+      clips.sort((a, b) => a.index - b.index)
+      if (clips.length === 0) throw new Error("No hay clips con video generado")
 
-      worker.onerror = (e) => {
-        stopTimer()
-        setPhase("error")
-        setErrorMsg(`Worker error: ${e.message}`)
-        workerRef.current = null
-      }
+      const label = `${chapterProjectName || "zentrix"}_cap${chapterNumber || 1}`
 
-      // Send start command to worker
-      worker.postMessage({
-        type: "start",
+      addExportJob({
+        chapterId,
+        chapterLabel: label,
         clips,
-        resolution,
         audioUrls: audioUrls || [],
+        resolution,
       })
+
+      onClose()
     } catch (err: unknown) {
-      stopTimer()
       const msg = err instanceof Error ? err.message : "Error desconocido"
-      setPhase("error")
       setErrorMsg(msg)
+    } finally {
+      setIsSubmitting(false)
     }
-  }, [chapterId, resolution, audioUrls, startTimer, stopTimer])
+  }, [chapterId, resolution, audioUrls, chapterProjectName, chapterNumber, onClose])
 
-  const handleCancel = useCallback(() => {
-    workerRef.current?.postMessage({ type: "cancel" })
-    workerRef.current?.terminate()
-    workerRef.current = null
-    setPhase("idle")
-    setProgress(0)
-    setStatusMsg("")
-    stopTimer()
-  }, [stopTimer])
-
-  const handleDownload = useCallback(() => {
-    if (!localDownloadUrl) return
-    const a = document.createElement("a")
-    a.href = localDownloadUrl
-    const safeName = `${chapterProjectName || "zentrix"}_cap${chapterNumber || 1}`.replace(/[^a-zA-Z0-9_-]/g, "_")
-    a.download = `${safeName}.mp4`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-  }, [localDownloadUrl, chapterProjectName, chapterNumber])
-
-  const handleClose = useCallback(() => {
-    // If exporting, just close the modal — worker keeps running in background
-    // The floating bar will show progress
-    onClose()
-  }, [onClose])
-
-  const handleStartClick = useCallback(() => {
-    if (chapterId) {
-      handleExport()
-    } else {
-      onStartExport(resolution)
-    }
-  }, [chapterId, handleExport, onStartExport, resolution])
-
-  const isWorking = phase === "loading" || phase === "processing" || phase === "finalizing"
+  /* ── Derived state ── */
+  const activeJobs = jobs.filter(
+    (j) => j.status !== "done" && j.status !== "error"
+  )
+  const finishedJobs = jobs.filter(
+    (j) => j.status === "done" || j.status === "error"
+  )
+  const hasJobs = jobs.length > 0
 
   /* ═══════════════════════════════════════════════
-     FLOATING PROGRESS BAR — shown when modal is
-     closed but export is still running
+     FLOATING QUEUE BAR — shown when modal is closed
+     but there are jobs (active, queued, or completed)
      ═══════════════════════════════════════════════ */
-  if (!isOpen && (isWorking || phase === "done")) {
+  if (!isOpen && hasJobs) {
     return (
       <div className="fixed bottom-4 right-4 z-[90] animate-in slide-in-from-bottom-4">
-        <div className="bg-[var(--surface-0)] border border-[var(--border-default)] rounded-xl shadow-2xl p-4 w-[320px]">
-          {isWorking ? (
-            <>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-white">Exportando...</span>
-                <span className="text-[10px] text-[var(--text-secondary)] font-mono">{formatTime(elapsed)}</span>
-              </div>
-              <div className="text-[10px] text-[var(--text-secondary)] mb-2">{statusMsg}</div>
-              <div className="h-1.5 w-full bg-[var(--surface-2)] rounded-full overflow-hidden mb-2">
-                <div className="h-full bg-[var(--tertiary)] transition-all duration-300 rounded-full" style={{ width: `${progress}%` }} />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] text-[var(--text-secondary)]">{clipCount} clips · {resolution} · {progress}%</span>
-                <button onClick={handleCancel} className="text-[10px] text-[var(--error)] hover:text-[var(--error-hover)]">
-                  Cancelar
-                </button>
-              </div>
-            </>
-          ) : phase === "done" ? (
-            <>
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-6 h-6 rounded-full bg-[var(--success-muted)] text-[var(--success)] flex items-center justify-center">
-                  <CheckCircleIcon className="w-4 h-4" />
-                </div>
-                <span className="text-xs font-medium text-white">¡Exportación completa!</span>
-              </div>
+        <div className="bg-[var(--surface-0)] border border-[var(--border-default)] rounded-xl shadow-2xl p-3 w-[340px] max-h-[400px] overflow-y-auto">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-2 px-1">
+            <span className="text-xs font-bold text-white uppercase tracking-wider">
+              Exports{activeJobs.length > 0 ? ` (${activeJobs.length} activo${activeJobs.length > 1 ? "s" : ""})` : ""}
+            </span>
+            {finishedJobs.length > 0 && (
               <button
-                onClick={handleDownload}
-                className="w-full py-2 text-xs font-medium bg-[var(--tertiary)] hover:bg-[var(--tertiary-hover)] text-white rounded-lg flex items-center justify-center gap-1.5"
+                onClick={clearFinishedJobs}
+                className="text-[10px] text-[var(--text-secondary)] hover:text-white transition-colors"
               >
-                <DownloadIcon className="w-3.5 h-3.5" /> Descargar MP4 ({totalMB} MB)
+                Limpiar
               </button>
-            </>
-          ) : null}
+            )}
+          </div>
+
+          {/* Job list */}
+          <div className="space-y-2">
+            {jobs.map((job) => {
+              const isActive = job.status === "loading" || job.status === "processing" || job.status === "finalizing"
+              const el = isActive ? elapsed(job) : 0
+              return (
+                <div
+                  key={job.id}
+                  className="p-2.5 rounded-lg bg-[var(--surface-1)] border border-[var(--border-default)]"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-medium text-white truncate max-w-[180px]">
+                      {job.chapterLabel}
+                    </span>
+                    <span className={`text-[10px] font-medium ${statusColor(job.status)}`}>
+                      {statusLabel(job.status)}
+                      {isActive && ` · ${formatTime(el)}`}
+                    </span>
+                  </div>
+
+                  {isActive && (
+                    <>
+                      <div className="text-[10px] text-[var(--text-secondary)] mb-1.5 truncate">{job.statusMsg}</div>
+                      <div className="h-1 w-full bg-[var(--surface-2)] rounded-full overflow-hidden mb-1.5">
+                        {job.status === "loading" ? (
+                          <div className="h-full bg-[var(--tertiary-muted)] w-full animate-pulse" />
+                        ) : (
+                          <div className="h-full bg-[var(--tertiary)] transition-all duration-300 rounded-full" style={{ width: `${job.progress}%` }} />
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-[var(--text-secondary)]">{job.clipCount} clips · {job.resolution} · {job.progress}%</span>
+                        <button
+                          onClick={() => cancelJob(job.id)}
+                          className="text-[10px] text-[var(--error)] hover:text-[var(--error-hover)]"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {job.status === "queued" && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-[var(--text-secondary)]">{job.clipCount} clips · {job.resolution}</span>
+                      <button
+                        onClick={() => cancelJob(job.id)}
+                        className="text-[10px] text-[var(--error)] hover:text-[var(--error-hover)]"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  )}
+
+                  {job.status === "done" && (
+                    <button
+                      onClick={() => downloadJob(job.id)}
+                      className="w-full py-1.5 text-[11px] font-medium bg-[var(--tertiary)] hover:bg-[var(--tertiary-hover)] text-white rounded-md flex items-center justify-center gap-1"
+                    >
+                      <DownloadIcon className="w-3 h-3" /> Descargar ({job.totalMB} MB)
+                    </button>
+                  )}
+
+                  {job.status === "error" && (
+                    <p className="text-[10px] text-[var(--error)] truncate">{job.error}</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
       </div>
     )
   }
 
-  // Not open and not working — render nothing
+  // Not open and no jobs — render nothing
   if (!isOpen) return null
 
   /* ═══════════════════════════════════════════════
@@ -339,7 +322,7 @@ export const ExportModal = memo(function ExportModal({
         {/* Header */}
         <div className="h-14 px-6 flex items-center justify-between border-b border-[var(--border-default)] bg-[var(--surface-0)]">
           <h3 className="text-sm font-bold text-white uppercase tracking-wider">Exportar Video</h3>
-          <button onClick={handleClose} className="text-[var(--text-secondary)] hover:text-white transition-colors">
+          <button onClick={onClose} className="text-[var(--text-secondary)] hover:text-white transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 6 6 18" /><path d="m6 6 12 12" />
             </svg>
@@ -348,108 +331,21 @@ export const ExportModal = memo(function ExportModal({
 
         {/* Content */}
         <div className="p-6">
-          {isWorking ? (
-            <div className="flex flex-col gap-4 py-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-white">
-                    {phase === "loading" && "Preparando..."}
-                    {phase === "processing" && "Procesando clips..."}
-                    {phase === "finalizing" && "Finalizando..."}
-                  </p>
-                  <p className="text-[10px] text-[var(--text-secondary)] mt-0.5">{statusMsg}</p>
-                </div>
-                <span className="text-xs text-[var(--text-secondary)] font-mono">{formatTime(elapsed)}</span>
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="h-2 w-full bg-[var(--surface-2)] rounded-full overflow-hidden">
-                  {phase === "loading" ? (
-                    <div className="h-full bg-[var(--tertiary-muted)] w-full animate-pulse" />
-                  ) : (
-                    <div className="h-full bg-[var(--tertiary)] transition-all duration-300 rounded-full" style={{ width: `${progress}%` }} />
-                  )}
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[10px] text-[var(--text-secondary)]">{clipCount} clips · {resolution}</span>
-                  <span className="text-xs text-[var(--tertiary)] font-medium">{progress}%</span>
-                </div>
-              </div>
-
-              {/* Tip: user can close and keep working */}
-              <div className="text-[10px] text-[var(--text-muted)] text-center mt-1">
-                Puedes cerrar esta ventana y seguir editando. La exportación continuará.
-              </div>
-
-              <button onClick={handleCancel} className="mt-1 text-sm text-[var(--error)] hover:text-[var(--error-hover)] transition-colors">
-                Cancelar
-              </button>
-            </div>
-
-          ) : phase === "done" && localDownloadUrl ? (
-            <div className="flex flex-col items-center gap-4 py-4 animate-in zoom-in-95">
-              <div className="w-16 h-16 rounded-full bg-[var(--success-muted)] text-[var(--success)] flex items-center justify-center mb-2">
-                <CheckCircleIcon className="w-8 h-8" />
-              </div>
-              <h4 className="text-lg font-semibold text-white">¡Exportación completa!</h4>
-              <p className="text-xs text-[var(--text-secondary)]">{statusMsg} · {formatTime(elapsed)}</p>
-
-              <button
-                onClick={handleDownload}
-                className="mt-2 w-full flex items-center justify-center gap-2 px-6 py-3 bg-[var(--tertiary)] hover:bg-[var(--tertiary-hover)] text-white rounded-lg font-medium transition-all shadow-lg cursor-pointer"
-              >
-                <DownloadIcon className="w-4 h-4" /> Descargar MP4
-              </button>
-
-              <video src={localDownloadUrl} controls className="w-full rounded-lg border border-[var(--border-default)] mt-1" style={{ maxHeight: "200px" }} />
-              <button onClick={handleClose} className="text-sm text-[var(--text-secondary)] hover:text-white">Cerrar</button>
-            </div>
-
-          ) : phase === "error" ? (
+          {errorMsg ? (
             <div className="flex flex-col items-center gap-4 py-4">
               <div className="w-16 h-16 rounded-full bg-[var(--error-muted)] text-[var(--error)] flex items-center justify-center mb-2">
                 <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" /><path d="M12 8v4" /><path d="M12 16h.01" />
                 </svg>
               </div>
-              <h4 className="text-lg font-semibold text-white">Error en la exportación</h4>
+              <h4 className="text-lg font-semibold text-white">Error</h4>
               <p className="text-sm text-[var(--text-tertiary)] text-center max-w-sm break-words">{errorMsg}</p>
-              <div className="flex gap-3 mt-2">
-                <button onClick={() => { setPhase("idle"); setErrorMsg("") }} className="px-4 py-2 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-white rounded-lg text-sm transition-colors">Volver</button>
-                <button onClick={handleExport} className="px-4 py-2 bg-[var(--tertiary)] hover:bg-[var(--tertiary-hover)] text-white rounded-lg text-sm transition-colors">Reintentar</button>
-              </div>
+              <button onClick={() => setErrorMsg("")} className="px-4 py-2 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-white rounded-lg text-sm transition-colors">
+                Volver
+              </button>
             </div>
-
-          ) : !chapterId && ffmpegError ? (
-            <div className="flex flex-col items-center gap-4 py-4">
-              <h4 className="text-lg font-semibold text-white">Export no disponible</h4>
-              <p className="text-sm text-[var(--text-tertiary)] text-center max-w-sm">{ffmpegError}</p>
-              <button onClick={handleClose} className="px-4 py-2 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-white rounded-lg text-sm transition-colors">Cerrar</button>
-            </div>
-
-          ) : !chapterId && downloadUrl ? (
-            <div className="flex flex-col items-center gap-4 py-4 animate-in zoom-in-95">
-              <div className="w-16 h-16 rounded-full bg-[var(--success-muted)] text-[var(--success)] flex items-center justify-center mb-2">
-                <CheckCircleIcon className="w-8 h-8" />
-              </div>
-              <h4 className="text-lg font-semibold text-white">¡Exportación completa!</h4>
-              <a href={downloadUrl} download="project_export.mp4" className="mt-2 w-full flex items-center justify-center gap-2 px-6 py-3 bg-[var(--tertiary)] hover:bg-[var(--tertiary-hover)] text-white rounded-lg font-medium transition-all shadow-lg">
-                <DownloadIcon className="w-4 h-4" />Descargar MP4
-              </a>
-              <button onClick={handleClose} className="text-sm text-[var(--text-secondary)] hover:text-white">Cerrar</button>
-            </div>
-
-          ) : !chapterId && isExporting ? (
-            <div className="flex flex-col gap-5 py-4">
-              <div className="text-center"><p className="text-sm font-medium text-white">Exportando...</p></div>
-              <div className="h-2 w-full bg-[var(--surface-2)] rounded-full overflow-hidden">
-                <div className="h-full bg-[var(--tertiary)] transition-all duration-300" style={{ width: `${exportProgress}%` }} />
-              </div>
-              <button onClick={onCancel} className="mt-1 text-sm text-[var(--error)] hover:text-[var(--error-hover)] transition-colors">Cancelar</button>
-            </div>
-
           ) : (
-            /* ── Pre-export ── */
+            /* ── Pre-export settings ── */
             <div className="flex flex-col gap-5">
               {chapterProjectName && (
                 <div className="flex items-center justify-between text-[11px] p-3 rounded-lg bg-[var(--surface-1)] border border-[var(--border-default)]">
@@ -465,11 +361,20 @@ export const ExportModal = memo(function ExportModal({
                 <ResolutionSelector resolution={resolution} onSelect={setResolution} />
               </div>
 
+              {/* Show queue status if there are active jobs */}
+              {activeJobs.length > 0 && (
+                <div className="text-[11px] p-3 rounded-lg bg-[var(--surface-1)] border border-[var(--border-default)] text-[var(--text-secondary)]">
+                  {activeJobs.length === 1 ? "Hay 1 export en progreso." : `Hay ${activeJobs.length} exports activos.`}
+                  {" "}Este se agregará a la cola.
+                </div>
+              )}
+
               <button
-                onClick={handleStartClick}
-                className="w-full py-3 bg-white text-black font-bold rounded-lg hover:bg-gray-200 transition-colors shadow-lg mt-2 flex items-center justify-center gap-2"
+                onClick={handleExport}
+                disabled={isSubmitting}
+                className="w-full py-3 bg-white text-black font-bold rounded-lg hover:bg-gray-200 transition-colors shadow-lg mt-2 flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                Exportar
+                {isSubmitting ? "Cargando..." : activeJobs.length > 0 ? "Agregar a la cola" : "Exportar"}
               </button>
             </div>
           )}
