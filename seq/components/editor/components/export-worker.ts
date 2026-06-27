@@ -57,6 +57,37 @@ async function loadFFmpegWorker(): Promise<FFmpeg> {
   return ff
 }
 
+/* ── Probe real duration of a file in ffmpeg's virtual FS ── */
+async function probeDuration(ff: FFmpeg, filename: string, fallback: number): Promise<number> {
+  let durationLine = ""
+  const handler = ({ message }: { message: string }) => {
+    // FFmpeg logs: "  Duration: 00:00:08.33, start: 0.000000, bitrate: ..."
+    if (message.includes("Duration:")) {
+      durationLine = message
+    }
+  }
+  ff.on("log", handler)
+  try {
+    // Run ffmpeg -i (no output) — it "fails" but still logs the header info
+    await ff.exec(["-i", filename, "-f", "null", "-"])
+  } catch {
+    // Expected to fail or succeed depending on version — either way the log fires
+  }
+  ff.off("log", handler)
+
+  // Parse "Duration: HH:MM:SS.xx"
+  const match = durationLine.match(/Duration:\s*(\d+):(\d+):([\d.]+)/)
+  if (match) {
+    const hours = parseInt(match[1], 10)
+    const minutes = parseInt(match[2], 10)
+    const seconds = parseFloat(match[3])
+    const real = hours * 3600 + minutes * 60 + seconds
+    if (real > 0) return real
+  }
+  // If probe failed, fall back to API duration
+  return fallback
+}
+
 /* ── Main export function ── */
 async function runExport(clips: SceneClip[], resolution: "720p" | "1080p", audioUrls: string[]) {
   cancelled = false
@@ -80,11 +111,15 @@ async function runExport(clips: SceneClip[], resolution: "720p" | "1080p", audio
     const data = new Uint8Array(await response.arrayBuffer())
     await ff.writeFile(`input_${i}.mp4`, data)
 
+    // Probe real duration (fixes black screen between transitions)
+    sendProgress("processing", Math.round((i / clips.length) * 95), `Clip ${i + 1} de ${clips.length} — analizando...`)
+    const realDuration = await probeDuration(ff, `input_${i}.mp4`, clips[i].duration)
+
     // Normalize with fade
     sendProgress("processing", Math.round((i / clips.length) * 95), `Clip ${i + 1} de ${clips.length} — procesando...`)
 
     const vol = clips[i].volume / 100
-    const clipDur = clips[i].duration
+    const clipDur = realDuration  // ← USE REAL DURATION, not API duration
     const isFirst = i === 0
     const isLast = i === clips.length - 1
 
