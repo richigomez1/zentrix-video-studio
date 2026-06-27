@@ -29,6 +29,7 @@ interface ExportModalProps {
   chapterProjectName?: string
   chapterNumber?: number
   chapterTitle?: string
+  audioUrls?: string[]
 }
 
 type ExportPhase = "idle" | "loading" | "downloading" | "processing" | "finalizing" | "done" | "error"
@@ -105,6 +106,7 @@ export const ExportModal = memo(function ExportModal({
   chapterProjectName,
   chapterNumber,
   chapterTitle,
+  audioUrls,
 }: ExportModalProps) {
   const [resolution, setResolution] = useState<"720p" | "1080p">("1080p")
 
@@ -384,6 +386,70 @@ export const ExportModal = memo(function ExportModal({
       if (cancelledRef.current) { stopTimer(); return }
 
       // ════════════════════════════════════════
+      // PHASE 3: Mix narration audio (if available)
+      // Only re-encodes audio — video stays -c:v copy (fast)
+      // ════════════════════════════════════════
+      const hasNarration = audioUrls && audioUrls.length > 0
+
+      if (hasNarration) {
+        setStatusMsg("Descargando narración...")
+        setProgress(93)
+
+        // Download first narration track
+        const narrationUrl = audioUrls[0]
+        const narResponse = await fetch(narrationUrl)
+        if (!narResponse.ok) throw new Error(`Error descargando narración: HTTP ${narResponse.status}`)
+        const narData = new Uint8Array(await narResponse.arrayBuffer())
+
+        // Detect extension from URL or default to mp3
+        const ext = narrationUrl.split('.').pop()?.split('?')[0] || "mp3"
+        await ffmpeg.writeFile(`narration.${ext}`, narData)
+
+        if (cancelledRef.current) { stopTimer(); return }
+
+        setStatusMsg("Mezclando narración con video...")
+        setProgress(95)
+
+        // Rename concat output for mixing
+        const concatData = await ffmpeg.readFile("output.mp4")
+        await ffmpeg.writeFile("video_only.mp4", concatData)
+        try { await ffmpeg.deleteFile("output.mp4") } catch {}
+
+        // Mix: video audio (ambient) + narration — video stream copied (no re-encode)
+        try {
+          await ffmpeg.exec([
+            "-i", "video_only.mp4",
+            "-i", `narration.${ext}`,
+            "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=first:dropout_transition=2[aout]",
+            "-map", "0:v", "-map", "[aout]",
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart",
+            "-y", "output.mp4",
+          ])
+        } catch (mixErr) {
+          // If amix fails (e.g., no audio in video), try replacing audio entirely
+          console.warn("amix failed, using narration as sole audio:", mixErr)
+          await ffmpeg.exec([
+            "-i", "video_only.mp4",
+            "-i", `narration.${ext}`,
+            "-map", "0:v", "-map", "1:a",
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k",
+            "-shortest",
+            "-movflags", "+faststart",
+            "-y", "output.mp4",
+          ])
+        }
+
+        // Cleanup
+        try { await ffmpeg.deleteFile("video_only.mp4") } catch {}
+        try { await ffmpeg.deleteFile(`narration.${ext}`) } catch {}
+      }
+
+      if (cancelledRef.current) { stopTimer(); return }
+
+      // ════════════════════════════════════════
       // PHASE 3: Verify + serve download
       // ════════════════════════════════════════
       setStatusMsg("Verificando...")
@@ -412,7 +478,7 @@ export const ExportModal = memo(function ExportModal({
       setErrorMsg(msg)
       stopTimer()
     }
-  }, [chapterId, resolution, startTimer, stopTimer])
+  }, [chapterId, resolution, audioUrls, startTimer, stopTimer])
 
   const handleCancel = useCallback(() => {
     cancelledRef.current = true
