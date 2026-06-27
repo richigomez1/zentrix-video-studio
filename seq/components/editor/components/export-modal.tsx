@@ -37,6 +37,7 @@ interface SceneClip {
   videoUrl: string
   duration: number
   volume: number
+  meta?: { fps: number; width: number; height: number; codec_v: string; codec_a: string; has_audio: boolean } | null
 }
 
 /* ── Helpers ── */
@@ -156,6 +157,7 @@ export const ExportModal = memo(function ExportModal({
           videoUrl: url,
           duration: vid.duration || 8,
           volume: vid.volume ?? 30,
+          meta: vid.veo_url ? vid.veo_meta : vid.kb_meta,
         })
       }
     }
