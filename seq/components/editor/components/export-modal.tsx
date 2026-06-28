@@ -184,7 +184,12 @@ export const ExportModal = memo(function ExportModal({
       clips.sort((a, b) => a.index - b.index)
       if (clips.length === 0) throw new Error("No hay clips con video generado")
 
-      const label = `${chapterProjectName || "zentrix"}_cap${chapterNumber || 1}`
+      // Nombre del archivo = nombre del capítulo (el que se ve en el editor),
+      // con el número de capítulo adelante para que ordene bien. Cae al nombre
+      // del proyecto solo si el capítulo no tiene título.
+      const label = chapterTitle
+        ? (chapterNumber ? `Cap${chapterNumber}_${chapterTitle}` : chapterTitle)
+        : `${chapterProjectName || "zentrix"}_cap${chapterNumber || 1}`
 
       addExportJob({
         chapterId,
