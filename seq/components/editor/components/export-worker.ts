@@ -243,7 +243,7 @@ async function mixNarration(ff: FFmpeg, audioUrls: string[]) {
     await ff.exec([
       "-i", "video_only.mp4",
       "-i", `narration.${ext}`,
-      "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=first:dropout_transition=2[aout]",
+      "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]",
       "-map", "0:v", "-map", "[aout]",
       "-c:v", "copy",
       "-c:a", "aac", "-b:a", "192k",
