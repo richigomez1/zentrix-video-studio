@@ -278,8 +278,9 @@ function SceneCard({
           </div>
           {scene.classification && (
             <div className="absolute bottom-1 left-1 bg-black/70 text-[9px] px-1.5 py-0.5 rounded text-blue-300">
-              {scene.classification === "landscape" ? "🏔 Paisaje" :
-               scene.classification === "character" ? "🧑 Personaje" : "🎭 Complejo"}
+              {(scene.classification === "landscape" || scene.classification === "paisaje") ? "🏔 Paisaje" :
+               (scene.classification === "character" || scene.classification === "narrativa") ? "🧑 Personaje" :
+               (scene.classification === "detalle") ? "🔬 Detalle" : "🎭 Complejo"}
             </div>
           )}
         </div>
@@ -621,6 +622,7 @@ export const ProductionPanel = memo(function ProductionPanel({
   const [isBrowserExportOpen, setIsBrowserExportOpen] = useState(false)
   const [statusMsg, setStatusMsg] = useState("")
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
+  const exportPollRef = useRef<NodeJS.Timeout | null>(null)
   const mountedRef = useRef(true)
 
   // ── Saved Ken Burns Presets (localStorage) ──
@@ -761,6 +763,7 @@ export const ProductionPanel = memo(function ProductionPanel({
     return () => {
       mountedRef.current = false
       if (pollingRef.current) clearInterval(pollingRef.current)
+      if (exportPollRef.current) clearInterval(exportPollRef.current)
     }
   }, [])
 
@@ -853,7 +856,7 @@ export const ProductionPanel = memo(function ProductionPanel({
             return {
               ...s,
               motionPrompt: prepared.motion_prompt || s.motionPrompt,
-              classification: prepared.classification || "",
+              classification: prepared.scene_type || prepared.classification || "",
               status: "ready" as const,
               // Keep model and duration as-is — user already chose them
             }
@@ -1065,17 +1068,20 @@ export const ProductionPanel = memo(function ProductionPanel({
       const jobId = result.export_job_id
       setStatusMsg("📦 Exportando... El worker está concatenando todos los clips + audio.")
 
-      // Poll export status
-      const pollExport = setInterval(async () => {
+      // Poll export status (tracked in a ref so it can be cleared on unmount)
+      if (exportPollRef.current) clearInterval(exportPollRef.current)
+      exportPollRef.current = setInterval(async () => {
         try {
           const status = await apiFetch(`/api/image-studio/chapters/${chapterId}/export-status/${jobId}`)
           if (status.status === "done" && status.download_url) {
-            clearInterval(pollExport)
+            if (exportPollRef.current) clearInterval(exportPollRef.current)
+            exportPollRef.current = null
             setExportUrl(status.download_url)
             setIsExporting(false)
             setStatusMsg("✅ ¡Exportación completa! Click en 'Descargar' para obtener el video.")
           } else if (status.status === "error") {
-            clearInterval(pollExport)
+            if (exportPollRef.current) clearInterval(exportPollRef.current)
+            exportPollRef.current = null
             setIsExporting(false)
             setStatusMsg(`❌ Error de exportación: ${status.error || "Error desconocido"}`)
           } else {
@@ -1260,12 +1266,9 @@ export const ProductionPanel = memo(function ProductionPanel({
                   prev.map((s) => {
                     const vid = data.videos.find((v: any) => v.segment_index === s.index)
 
-                    // If backend has no record AND scene claims to be done → reset to pending
+                    // If backend has no record, do NOT touch the scene.
+                    // (A momentary incomplete response must never wipe a finished video.)
                     if (!vid) {
-                      if (s.status === "done" && s.videoUrl) {
-                        updated++
-                        return { ...s, status: "pending" as const, videoUrl: null, errorMsg: "" }
-                      }
                       return s
                     }
 
@@ -1278,11 +1281,9 @@ export const ProductionPanel = memo(function ProductionPanel({
                     const relevantStatus = isKB ? kbStatus : (veoStatus !== "none" ? veoStatus : kbStatus)
                     const relevantUrl = isKB ? kbUrl : (veoUrl || kbUrl)
 
-                    // Backend says no video exists for this scene → reset
-                    if (relevantStatus === "none" && s.status === "done") {
-                      updated++
-                      return { ...s, status: "pending" as const, videoUrl: null, errorMsg: "" }
-                    }
+                    // Note: we intentionally do NOT downgrade a finished scene to
+                    // "pending" just because the backend reports "none" — that caused
+                    // good videos to disappear on a partial response.
 
                     // Update if: new video found, or status changed, or URL refreshed
                     if (relevantStatus === "done" && relevantUrl) {
