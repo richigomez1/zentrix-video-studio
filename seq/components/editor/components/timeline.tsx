@@ -382,7 +382,7 @@ export const Timeline = memo(function Timeline({
               headerContainerRef.current.scrollTop = scrollContainerRef.current.scrollTop
             }
           }}
-          className="flex-1 overflow-x-auto overflow-y-auto relative bg-[var(--surface-0)] custom-scrollbar"
+          className="flex-1 overflow-x-auto overflow-y-auto relative bg-[var(--surface-0)] custom-scrollbar [&::-webkit-scrollbar:horizontal]:hidden"
           onMouseDown={(e) => {
             const target = e.target as HTMLElement
             if (!target.closest("[data-clip]")) {
@@ -559,6 +559,57 @@ export const Timeline = memo(function Timeline({
           />
         )}
       </div>
+
+      {/* Barra de desplazamiento horizontal propia: agarre grande con ancho
+          mínimo (44px) para que sea fácil de agarrar aun en videos largos. */}
+      {!hasNoClips && totalWidth > viewportWidth + 1 && (() => {
+        const track = Math.max(0, viewportWidth)
+        const thumbW = Math.max(44, Math.min(track, track * (viewportWidth / totalWidth)))
+        const maxScroll = totalWidth - viewportWidth
+        const maxThumb = track - thumbW
+        const thumbLeft = maxScroll > 0 ? Math.min(maxThumb, (scrollLeft / maxScroll) * maxThumb) : 0
+        return (
+          <div className="shrink-0 flex bg-[var(--surface-0)] border-t border-[var(--border-default)]">
+            <div className="w-32 shrink-0" />
+            <div
+              className="relative flex-1 h-4 py-[4px] cursor-pointer"
+              onMouseDown={(e) => {
+                if (!scrollContainerRef.current || maxThumb <= 0) return
+                const barRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                const clickX = e.clientX - barRect.left
+                if (clickX < thumbLeft || clickX > thumbLeft + thumbW) {
+                  const target = Math.min(maxThumb, Math.max(0, clickX - thumbW / 2))
+                  scrollContainerRef.current.scrollLeft = (target / maxThumb) * maxScroll
+                }
+              }}
+            >
+              <div
+                className="absolute top-[4px] h-2 rounded-full bg-[var(--text-muted)] hover:bg-[var(--text-secondary)] active:bg-[var(--accent-primary)] transition-colors"
+                style={{ left: `${thumbLeft}px`, width: `${thumbW}px` }}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (!scrollContainerRef.current || maxThumb <= 0) return
+                  const startX = e.clientX
+                  const startScroll = scrollContainerRef.current.scrollLeft
+                  const move = (ev: MouseEvent) => {
+                    if (!scrollContainerRef.current) return
+                    const dx = ev.clientX - startX
+                    const next = startScroll + (dx / maxThumb) * maxScroll
+                    scrollContainerRef.current.scrollLeft = Math.min(maxScroll, Math.max(0, next))
+                  }
+                  const up = () => {
+                    window.removeEventListener("mousemove", move)
+                    window.removeEventListener("mouseup", up)
+                  }
+                  window.addEventListener("mousemove", move)
+                  window.addEventListener("mouseup", up)
+                }}
+              />
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 })
