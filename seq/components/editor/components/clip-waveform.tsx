@@ -1,5 +1,4 @@
 "use client"
-
 import { memo, useEffect, useState } from "react"
 import { generateWaveform, generateFakeWaveform, type WaveformData } from "../utils/waveform-generator"
 
@@ -17,49 +16,53 @@ export const ClipWaveform = memo(
     const [waveformData, setWaveformData] = useState<WaveformData | null>(null)
     const [isLoading, setIsLoading] = useState(false)
 
-    // Calculate number of bars based on clip width
+    // Más barras y más finas → detalle tipo Premiere
     const clipWidth = duration * zoomLevel
-    const numBars = Math.min(200, Math.max(20, Math.floor(clipWidth / 3)))
+    const numBars = Math.min(600, Math.max(30, Math.floor(clipWidth / 2)))
 
     useEffect(() => {
       if (!mediaUrl) return
-
       let cancelled = false
       setIsLoading(true)
-
       generateWaveform(mediaUrl, numBars).then((data) => {
         if (!cancelled) {
           setWaveformData(data)
           setIsLoading(false)
         }
       })
-
       return () => {
         cancelled = true
       }
     }, [mediaUrl, numBars])
 
-    // Use real waveform data if available, otherwise generate fake
     const peaks = waveformData?.peaks || generateFakeWaveform(duration, offset, numBars)
-
-    // Calculate which portion of the waveform to display based on offset
     const startIndex = waveformData ? Math.floor((offset / waveformData.duration) * peaks.length) : 0
     const visiblePeaks = waveformData ? peaks.slice(startIndex, startIndex + numBars) : peaks
 
+    // Color de la onda según estado
+    const barColor = isSelected
+      ? "rgba(255,255,255,0.9)"
+      : isAudio
+        ? "rgba(52,211,153,0.85)"   // emerald-400 sólido
+        : "rgba(255,255,255,0.45)"
+
     return (
       <div
-        className={`w-full h-full flex items-end gap-[1px] overflow-hidden pointer-events-none transition-opacity ${isLoading ? "opacity-40" : "opacity-80"}`}
+        className={`w-full h-full flex items-center justify-start gap-[1px] overflow-hidden pointer-events-none transition-opacity ${isLoading ? "opacity-40" : "opacity-95"}`}
         aria-hidden="true"
       >
         {visiblePeaks.map((peak, i) => {
-          const height = 15 + peak * 75
+          // Onda SIMÉTRICA (espejo): crece desde el centro hacia arriba y abajo — estilo Premiere/CapCut
+          const height = Math.max(6, 8 + peak * 88)
           return (
             <div
               key={i}
-              className={`flex-1 rounded-t-[1px] min-w-[2px] transition-colors ${
-                isSelected ? "bg-white/80" : isAudio ? "bg-emerald-400/60" : "bg-white/30"
-              }`}
-              style={{ height: `${height}%` }}
+              className="flex-1 min-w-[1px] rounded-full"
+              style={{
+                height: `${height}%`,
+                background: barColor,
+                alignSelf: "center",
+              }}
             />
           )
         })}
