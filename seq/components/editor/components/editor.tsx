@@ -971,8 +971,10 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
     if (clips.length === 0) return
     const maxEnd = Math.max(...clips.map((c) => c.start + c.duration))
     if (maxEnd <= 0) return
-    const containerWidth = 800
-    const newZoom = Math.max(10, Math.min(200, (containerWidth - 100) / maxEnd))
+    // Usar el ancho real disponible de la ventana (menos paneles laterales ~360px)
+    const containerWidth = Math.max(600, (typeof window !== "undefined" ? window.innerWidth : 1200) - 360)
+    // Permitir alejar hasta 0.5 px/s para que quepa incluso un video largo (10+ min)
+    const newZoom = Math.max(0.5, Math.min(200, (containerWidth - 80) / maxEnd))
     setZoomLevel(newZoom)
   }, [timeline])
 
