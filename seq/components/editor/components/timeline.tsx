@@ -152,6 +152,22 @@ export const Timeline = memo(function Timeline({
     return Math.max(maxEnd * zoomLevel + 500, 2000)
   }, [clips, zoomLevel])
 
+  // ── Auto-scroll: el timeline sigue al playhead durante la reproducción ──
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const playheadX = currentTime * zoomLevel
+    const viewStart = el.scrollLeft
+    const viewEnd = el.scrollLeft + el.clientWidth
+    const margin = 80
+    // Si el playhead se sale por la derecha o por la izquierda, desplazamos la vista
+    if (playheadX > viewEnd - margin) {
+      el.scrollLeft = playheadX - el.clientWidth + margin * 2
+    } else if (playheadX < viewStart + margin) {
+      el.scrollLeft = Math.max(0, playheadX - margin)
+    }
+  }, [currentTime, zoomLevel])
+
   const {
     snapConfig,
     showSnapMenu,
@@ -382,7 +398,7 @@ export const Timeline = memo(function Timeline({
               headerContainerRef.current.scrollTop = scrollContainerRef.current.scrollTop
             }
           }}
-          className="flex-1 overflow-x-auto overflow-y-auto relative bg-[var(--surface-0)] custom-scrollbar [&::-webkit-scrollbar:horizontal]:hidden"
+          className="flex-1 overflow-x-auto overflow-y-auto relative bg-[var(--surface-0)] custom-scrollbar"
           onMouseDown={(e) => {
             const target = e.target as HTMLElement
             if (!target.closest("[data-clip]")) {
