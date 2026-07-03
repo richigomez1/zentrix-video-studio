@@ -398,7 +398,8 @@ export const Timeline = memo(function Timeline({
               headerContainerRef.current.scrollTop = scrollContainerRef.current.scrollTop
             }
           }}
-          className="flex-1 overflow-x-auto overflow-y-auto relative bg-[var(--surface-0)] custom-scrollbar"
+          className="flex-1 overflow-x-scroll overflow-y-auto relative bg-[var(--surface-0)] custom-scrollbar"
+          style={{ scrollbarWidth: "auto", scrollbarColor: "var(--text-tertiary) var(--surface-1)" }}
           onMouseDown={(e) => {
             const target = e.target as HTMLElement
             if (!target.closest("[data-clip]")) {
@@ -556,36 +557,43 @@ export const Timeline = memo(function Timeline({
         </div>
 
         {/* ── Barra desplazadora horizontal (arrastrar para moverse de lado a lado) ── */}
-        {totalWidth > viewportWidth && viewportWidth > 0 && (
-          <div className="h-3 bg-[var(--surface-1)] border-t border-[var(--border-default)] relative select-none shrink-0">
-            <div
-              className="absolute top-0.5 bottom-0.5 bg-[var(--text-tertiary)] hover:bg-[var(--text-secondary)] rounded-full cursor-grab active:cursor-grabbing transition-colors"
-              style={{
-                left: `${(scrollLeft / totalWidth) * 100}%`,
-                width: `${Math.max(8, (viewportWidth / totalWidth) * 100)}%`,
-              }}
-              onMouseDown={(e) => {
-                e.preventDefault()
-                const startX = e.clientX
-                const startScroll = scrollContainerRef.current?.scrollLeft || 0
-                const trackWidth = (e.currentTarget.parentElement as HTMLElement).clientWidth
-                const onMove = (ev: MouseEvent) => {
-                  const dx = ev.clientX - startX
-                  const ratio = totalWidth / trackWidth
-                  if (scrollContainerRef.current) {
-                    scrollContainerRef.current.scrollLeft = startScroll + dx * ratio
+        <div className="h-4 bg-[var(--surface-1)] border-t border-[var(--border-default)] relative select-none shrink-0">
+          {(() => {
+            const container = scrollContainerRef.current
+            const viewW = container?.clientWidth || viewportWidth || 0
+            // scrollLeft del hook fuerza el re-render; usamos el valor vivo si existe
+            const scrollX = container ? container.scrollLeft : scrollLeft
+            void scrollLeft; void viewportWidth  // dependencias para re-render
+            if (totalWidth <= viewW || viewW <= 0) return null
+            const thumbPct = Math.max(6, (viewW / totalWidth) * 100)
+            const leftPct = (scrollX / totalWidth) * 100
+            return (
+              <div
+                className="absolute top-1 bottom-1 bg-[var(--text-tertiary)] hover:bg-[var(--text-secondary)] rounded-full cursor-grab active:cursor-grabbing transition-colors"
+                style={{ left: `${leftPct}%`, width: `${thumbPct}%` }}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  const startX = e.clientX
+                  const startScroll = scrollContainerRef.current?.scrollLeft || 0
+                  const trackWidth = (e.currentTarget.parentElement as HTMLElement).clientWidth
+                  const onMove = (ev: MouseEvent) => {
+                    const dx = ev.clientX - startX
+                    const ratio = totalWidth / trackWidth
+                    if (scrollContainerRef.current) {
+                      scrollContainerRef.current.scrollLeft = startScroll + dx * ratio
+                    }
                   }
-                }
-                const onUp = () => {
-                  window.removeEventListener("mousemove", onMove)
-                  window.removeEventListener("mouseup", onUp)
-                }
-                window.addEventListener("mousemove", onMove)
-                window.addEventListener("mouseup", onUp)
-              }}
-            />
-          </div>
-        )}
+                  const onUp = () => {
+                    window.removeEventListener("mousemove", onMove)
+                    window.removeEventListener("mouseup", onUp)
+                  }
+                  window.addEventListener("mousemove", onMove)
+                  window.addEventListener("mouseup", onUp)
+                }}
+              />
+            )
+          })()}
+        </div>
         {contextMenu && (
           <TimelineContextMenu
             x={contextMenu.x}
