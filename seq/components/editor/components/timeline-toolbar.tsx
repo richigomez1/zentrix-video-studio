@@ -554,16 +554,16 @@ export const TimelineToolbar = memo(function TimelineToolbar({
               type="range"
               min={0}
               max={100}
-              value={Math.round(Math.log(zoomLevel / 2) / Math.log(500 / 2) * 100)}
+              value={Math.round(Math.log(zoomLevel / 0.5) / Math.log(500 / 0.5) * 100)}
               onChange={(e) => {
                 const t = Number(e.target.value) / 100
-                const newZoom = Math.round(2 * Math.pow(500 / 2, t))
-                onZoomChange(Math.max(2, Math.min(500, newZoom)))
+                const newZoom = Math.round((0.5 * Math.pow(500 / 0.5, t)) * 10) / 10
+                onZoomChange(Math.max(0.5, Math.min(500, newZoom)))
               }}
               className="w-24 h-1 accent-indigo-500 cursor-pointer"
               title={`Zoom: ${Math.round(zoomLevel)}px/s`}
             />
-            <span className="text-[10px] font-mono text-[var(--text-tertiary)] w-12 text-center">{Math.round(zoomLevel)}px/s</span>
+            <span className="text-[10px] font-mono text-[var(--text-tertiary)] w-12 text-center">{zoomLevel < 1 ? zoomLevel.toFixed(1) : Math.round(zoomLevel)}px/s</span>
             <button
               onClick={() => onZoomChange(getNextZoom(zoomLevel))}
               className="p-1 hover:text-[var(--text-primary)] text-[var(--text-tertiary)] hover:bg-white/[0.06] rounded"
