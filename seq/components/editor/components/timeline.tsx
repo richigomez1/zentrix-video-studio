@@ -1,233 +1,661 @@
 "use client"
 
 import type React from "react"
-import { memo } from "react"
-import type { TimelineClip, MediaItem, Track } from "../types"
-import { ClipWaveform } from "./clip-waveform"
-import { LockIcon } from "./icons"
+import { useRef, useState, useCallback, memo, useMemo, useEffect } from "react"
+import type { TimelineClip, Track, MediaItem, Marker } from "../types"
+import { TimelineRuler } from "./timeline-ruler"
+import { TimelineClipItem } from "./timeline-clip"
+import { TimelineToolbar } from "./timeline-toolbar"
+import { TimelineTrackHeaders } from "./timeline-track-headers"
+import { TimelineContextMenu } from "./timeline-context-menu"
+import { TimelineMarkers } from "./timeline-markers"
+import { useTimelineSnap } from "../hooks/use-timeline-snap"
+import { useTimelineDrag } from "../hooks/use-timeline-drag"
+import { useTimelineSelection } from "../hooks/use-timeline-selection"
+import { useScrollPosition } from "../hooks/use-virtualized-clips"
+import { FilmIcon } from "./icons"
 
-interface TimelineClipItemProps {
-  clip: TimelineClip
-  media: MediaItem | undefined
-  track: Track
+interface TimelineProps {
+  tracks: Track[]
+  clips: TimelineClip[]
+  mediaMap: Record<string, MediaItem>
+  currentTime: number
+  duration: number
   zoomLevel: number
-  isSelected: boolean
+  selectedClipIds: string[]
+  className?: string
+  style?: React.CSSProperties
   tool: "select" | "razor"
-  onMouseDown: (e: React.MouseEvent, mode: "move" | "trim-start" | "trim-end") => void
-  onContextMenu: (e: React.MouseEvent) => void
-  onKeyDown?: (e: React.KeyboardEvent) => void
-  tabIndex?: number
+  isPlaying: boolean
+  isLooping: boolean
+  onPlayPause: () => void
+  onToggleLoop: () => void
+  onSeek: (time: number) => void
+  onSelectClips: (clipIds: string[]) => void
+  onZoomChange: (zoom: number) => void
+  onClipUpdate: (clipId: string, changes: Partial<TimelineClip>) => void
+  onTrackUpdate: (trackId: string, changes: Partial<Track>) => void
+  onSplitClip: (clipId: string, splitTime: number) => void
+  onDetachAudio: (clipId: string) => void
+  onDeleteClip: (clipIds: string[]) => void
+  onRippleDeleteClip: (clipIds: string[]) => void
+  onDuplicateClip: (clipIds: string[]) => void
+  onToolChange: (tool: "select" | "razor") => void
+  onDragStart: () => void
+  onAddTrack?: (type: "video" | "audio" | "text") => void
+  onReorderTracks?: (trackIds: string[]) => void
+  onAddTextClip?: (trackId: string, start: number) => void
+  isRendering?: boolean
+  renderProgress?: number
+  renderedPreviewUrl?: string | null
+  isPreviewStale?: boolean
+  onRenderPreview?: () => void
+  onCancelRender?: () => void
+  isPreviewPlayback?: boolean
+  onTogglePreviewPlayback?: () => void
+  onExportAudio?: (clipIds: string[]) => void
+  frameRate?: number
+  historyCount?: number
+  futureCount?: number
+  onUndo?: () => void
+  onRedo?: () => void
+  onShowShortcuts?: () => void
+  markers?: Marker[]
+  onAddMarker?: () => void
+  onMarkerClick?: (marker: Marker) => void
+  onMarkerDelete?: (markerId: string) => void
+  onMarkerUpdate?: (markerId: string, changes: Partial<Marker>) => void
+  onZoomToFit?: () => void
+  onOverwriteClips?: (movedClipIds: string[]) => void
 }
 
-export const TimelineClipItem = memo(
-  ({
-    clip,
-    media,
-    track,
-    zoomLevel,
-    isSelected,
-    tool,
-    onMouseDown,
-    onContextMenu,
-    onKeyDown,
-    tabIndex = 0,
-  }: TimelineClipItemProps) => {
-    const isAudio = track.type === "audio"
-    const isText = track.type === "text"
-    const isLocked = clip.isLocked || track.isLocked
+export const Timeline = memo(function Timeline({
+  tracks,
+  clips,
+  mediaMap,
+  currentTime,
+  duration,
+  zoomLevel,
+  selectedClipIds = [],
+  className,
+  style,
+  tool,
+  isPlaying,
+  isLooping,
+  onPlayPause,
+  onToggleLoop,
+  onSeek,
+  onSelectClips,
+  onZoomChange,
+  onClipUpdate,
+  onTrackUpdate,
+  onSplitClip,
+  onDetachAudio,
+  onDeleteClip,
+  onRippleDeleteClip,
+  onDuplicateClip,
+  onToolChange,
+  onDragStart,
+  onAddTrack,
+  onReorderTracks,
+  onAddTextClip,
+  isRendering = false,
+  renderProgress = 0,
+  renderedPreviewUrl = null,
+  isPreviewStale = false,
+  onRenderPreview,
+  onCancelRender,
+  isPreviewPlayback = false,
+  onTogglePreviewPlayback,
+  onExportAudio,
+  frameRate = 30,
+  historyCount = 0,
+  futureCount = 0,
+  onUndo,
+  onRedo,
+  onShowShortcuts,
+  markers = [],
+  onAddMarker,
+  onMarkerClick,
+  onMarkerDelete,
+  onMarkerUpdate,
+  onZoomToFit,
+  onOverwriteClips,
+}: TimelineProps) {
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const headerContainerRef = useRef<HTMLDivElement>(null)
+  const [isScrubbing, setIsScrubbing] = useState(false)
+  const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; clipId: string } | null>(null)
 
-    const handleClipMouseDown = (e: React.MouseEvent, mode: "move" | "trim-start" | "trim-end") => {
-      if (!isLocked) {
-        onMouseDown(e, mode)
+  const { scrollLeft, viewportWidth } = useScrollPosition(scrollContainerRef)
+
+  const visibleClipsByTrack = useMemo(() => {
+    const buffer = 200
+    const startTime = Math.max(0, (scrollLeft - buffer) / zoomLevel)
+    const endTime = (scrollLeft + viewportWidth + buffer) / zoomLevel
+
+    const result: Record<string, TimelineClip[]> = {}
+    for (const track of tracks) {
+      result[track.id] = clips.filter((clip) => {
+        if (clip.trackId !== track.id) return false
+        const clipEnd = clip.start + clip.duration
+        return clipEnd >= startTime && clip.start <= endTime
+      })
+    }
+    return result
+  }, [clips, tracks, scrollLeft, viewportWidth, zoomLevel])
+
+  const totalWidth = useMemo(() => {
+    if (clips.length === 0) return 2000
+    const maxEnd = Math.max(...clips.map((c) => c.start + c.duration))
+    return Math.max(maxEnd * zoomLevel + 500, 2000)
+  }, [clips, zoomLevel])
+
+  // ── Auto-scroll: el timeline sigue al playhead durante la reproducción ──
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const playheadX = currentTime * zoomLevel
+    const viewStart = el.scrollLeft
+    const viewEnd = el.scrollLeft + el.clientWidth
+    const margin = 80
+    // Si el playhead se sale por la derecha o por la izquierda, desplazamos la vista
+    if (playheadX > viewEnd - margin) {
+      el.scrollLeft = playheadX - el.clientWidth + margin * 2
+    } else if (playheadX < viewStart + margin) {
+      el.scrollLeft = Math.max(0, playheadX - margin)
+    }
+  }, [currentTime, zoomLevel])
+
+  const {
+    snapConfig,
+    showSnapMenu,
+    setShowSnapMenu,
+    getSnapTime,
+    toggleSnapEnabled,
+    toggleSnapOption,
+    setGridInterval,
+  } = useTimelineSnap({
+    clips,
+    currentTime,
+    zoomLevel,
+    isDraggingPlayhead,
+  })
+
+  const { dragState, snapIndicator, handleMouseDownClip, handleDragMove, handleDragEnd } = useTimelineDrag({
+    clips,
+    tracks,
+    selectedClipIds,
+    zoomLevel,
+    tool,
+    snapEnabled: snapConfig.enabled,
+    getSnapTime,
+    onClipUpdate,
+    onSelectClips,
+    onSplitClip,
+    onDragStart,
+    onOverwriteClips: onOverwriteClips || (() => {}),
+  })
+
+  const { isSelecting, selectionBox, handleMouseDownBackground, handleSelectionMove, handleSelectionEnd } =
+    useTimelineSelection({
+      clips,
+      tracks,
+      zoomLevel,
+      tool,
+      onSelectClips,
+      onToolChange,
+      scrollContainerRef,
+    })
+
+  const handleTrackDoubleClick = useCallback(
+    (e: React.MouseEvent, track: Track) => {
+      if (track.type !== "text" || !onAddTextClip) return
+      if (!scrollContainerRef.current) return
+
+      const rect = scrollContainerRef.current.getBoundingClientRect()
+      const scrollLeft = scrollContainerRef.current.scrollLeft
+      const x = e.clientX - rect.left + scrollLeft
+      const time = Math.max(0, x / zoomLevel)
+
+      onAddTextClip(track.id, time)
+    },
+    [zoomLevel, onAddTextClip],
+  )
+
+  useEffect(() => {
+    if (dragState.mode !== "none") {
+      const handleMouseMove = (e: MouseEvent) => {
+        handleDragMove(e)
+      }
+      const handleMouseUp = () => {
+        handleDragEnd()
+      }
+
+      window.addEventListener("mousemove", handleMouseMove)
+      window.addEventListener("mouseup", handleMouseUp)
+
+      return () => {
+        window.removeEventListener("mousemove", handleMouseMove)
+        window.removeEventListener("mouseup", handleMouseUp)
       }
     }
+  }, [dragState.mode, handleDragMove, handleDragEnd])
 
-    const baseColor = isText ? "bg-purple-900/40" : isAudio ? "bg-emerald-900/40" : "bg-[var(--surface-2)]"
-    const hoverColor = isText
-      ? "hover:bg-purple-900/60"
-      : isAudio
-        ? "hover:bg-emerald-900/60"
-        : "hover:bg-[var(--surface-3)]"
-    const cursorClass = isLocked ? "cursor-not-allowed" : tool === "razor" ? "cursor-crosshair" : "cursor-pointer"
+  useEffect(() => {
+    if (isDraggingPlayhead) {
+      const handleMouseMove = (e: MouseEvent) => {
+        if (!scrollContainerRef.current) return
+        const rect = scrollContainerRef.current.getBoundingClientRect()
+        const scrollLeft = scrollContainerRef.current.scrollLeft
+        const x = e.clientX - rect.left + scrollLeft
+        const newTime = Math.max(0, Math.min(duration, x / zoomLevel))
+        onSeek(newTime)
+      }
+      const handleMouseUp = () => {
+        setIsDraggingPlayhead(false)
+      }
 
-    const selectedClass = isSelected
-      ? isText
-        ? "bg-purple-900/60 border-purple-400 z-20 ring-1 ring-purple-400 shadow-md"
-        : isAudio
-          ? "bg-emerald-900/60 border-emerald-400 z-20 ring-1 ring-emerald-400 shadow-md"
-          : "bg-[var(--surface-3)] border-[var(--tertiary)] z-20 ring-1 ring-[var(--tertiary)] shadow-md"
-      : `${baseColor} ${hoverColor} border-transparent hover:border-[var(--border-emphasis)] z-10`
+      window.addEventListener("mousemove", handleMouseMove)
+      window.addEventListener("mouseup", handleMouseUp)
 
-    const lockedClass = isLocked ? "opacity-60 grayscale-[30%]" : ""
-
-    const borderClass = "border"
-    const verticalPos = isText ? "top-1 bottom-1" : isAudio ? "top-1 bottom-1" : "top-0 bottom-0"
-
-    const formatTimeForSR = (seconds: number) => {
-      const mins = Math.floor(seconds / 60)
-      const secs = Math.floor(seconds % 60)
-      return `${mins} minutes ${secs} seconds`
+      return () => {
+        window.removeEventListener("mousemove", handleMouseMove)
+        window.removeEventListener("mouseup", handleMouseUp)
+      }
     }
+  }, [isDraggingPlayhead, duration, zoomLevel, onSeek])
 
-    const clipLabel = isText
-      ? `Text clip: "${clip.textOverlay?.text || "Untitled"}". Duration: ${formatTimeForSR(clip.duration)}. Starts at ${formatTimeForSR(clip.start)}.${isSelected ? " Selected." : ""}${isLocked ? " Locked." : ""}`
-      : `${isAudio ? "Audio" : "Video"} clip: ${media?.prompt || "Untitled"}. Duration: ${formatTimeForSR(clip.duration)}. Starts at ${formatTimeForSR(clip.start)}.${isSelected ? " Selected." : ""}${isLocked ? " Locked." : ""}`
+  useEffect(() => {
+    if (isSelecting) {
+      const handleMouseMove = (e: MouseEvent) => {
+        handleSelectionMove(e)
+      }
+      const handleMouseUp = () => {
+        handleSelectionEnd()
+      }
 
-    return (
-      <div
-        role="button"
-        aria-label={clipLabel}
-        aria-selected={isSelected}
-        aria-disabled={isLocked}
-        tabIndex={isLocked ? -1 : tabIndex}
-        onKeyDown={onKeyDown}
-        data-clip="true"
-        className={`clip-item absolute ${verticalPos} rounded-md overflow-visible ${cursorClass} flex flex-col ${borderClass} transition-colors select-none group/item ${selectedClass} ${lockedClass} focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--surface-0)] focus-visible:ring-[var(--tertiary)]`}
-        style={{
-          left: `${clip.start * zoomLevel}px`,
-          width: `${clip.duration * zoomLevel}px`,
-          opacity: track.isMuted ? 0.5 : undefined,
-        }}
-        onMouseDown={(e) => handleClipMouseDown(e, "move")}
-        onContextMenu={onContextMenu}
-      >
-        {isLocked && (
-          <div className="absolute top-1 right-1 z-40 bg-black/60 rounded p-0.5" title="Clip is locked">
-            <LockIcon className="w-3 h-3 text-[var(--text-muted)]" />
-          </div>
-        )}
+      window.addEventListener("mousemove", handleMouseMove)
+      window.addEventListener("mouseup", handleMouseUp)
 
-        {clip.fadeIn && clip.fadeIn > 0 && (
-          <div
-            className="absolute left-0 top-0 bottom-0 z-20 pointer-events-none"
-            style={{ width: `${clip.fadeIn * zoomLevel}px` }}
-          >
-            <div className="absolute inset-0 bg-gradient-to-r from-black/60 to-transparent" />
-            <svg className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
-              <polygon points={`0,100% 100%,0 100%,100%`} fill="white" fillOpacity="0.1" />
-            </svg>
-          </div>
-        )}
-        {clip.fadeOut && clip.fadeOut > 0 && (
-          <div
-            className="absolute right-0 top-0 bottom-0 z-20 pointer-events-none"
-            style={{ width: `${clip.fadeOut * zoomLevel}px` }}
-          >
-            <div className="absolute inset-0 bg-gradient-to-l from-black/60 to-transparent" />
-            <svg className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
-              <polygon points={`0,0 100%,100% 0,100%`} fill="white" fillOpacity="0.1" />
-            </svg>
-          </div>
-        )}
+      return () => {
+        window.removeEventListener("mousemove", handleMouseMove)
+        window.removeEventListener("mouseup", handleMouseUp)
+      }
+    }
+  }, [isSelecting, handleSelectionMove, handleSelectionEnd])
 
-        {clip.transition && clip.transition.type !== "none" && (
-          <div
-            className="absolute left-0 top-0 bottom-0 z-30 bg-gradient-to-r from-white/30 to-transparent pointer-events-none border-r border-white/20 flex items-center justify-start pl-1"
-            style={{ width: `${clip.transition.duration * zoomLevel}px` }}
-            aria-hidden="true"
-          >
-            <div className="text-[9px] text-white/80 font-bold -rotate-90 origin-left translate-y-4 truncate w-full">
-              {clip.transition.type.replace("-", " ")}
-            </div>
-          </div>
-        )}
+  useEffect(() => {
+    if (contextMenu) {
+      const handleClickOutside = (e: MouseEvent) => {
+        setContextMenu(null)
+      }
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          setContextMenu(null)
+        }
+      }
 
-        {!isLocked && (
-          <>
-            <div
-              role="slider"
-              aria-label="Trim start"
-              aria-valuemin={0}
-              aria-valuemax={clip.start + clip.duration}
-              aria-valuenow={clip.start}
-              className={`absolute -left-3 top-0 bottom-0 w-6 cursor-ew-resize z-30 flex items-center justify-center group/handle opacity-0 group-hover/item:opacity-100 ${isSelected && "opacity-100"}`}
-              onMouseDown={(e) => handleClipMouseDown(e, "trim-start")}
-            >
-              <div className="w-1 h-6 bg-white rounded-full shadow-sm group-hover/handle:scale-110 transition-transform"></div>
-            </div>
+      // Use setTimeout to avoid the menu closing immediately from the same click
+      const timer = setTimeout(() => {
+        window.addEventListener("click", handleClickOutside)
+        window.addEventListener("contextmenu", handleClickOutside)
+      }, 0)
+      window.addEventListener("keydown", handleKeyDown)
 
-            <div
-              role="slider"
-              aria-label="Trim end"
-              aria-valuemin={clip.start}
-              aria-valuemax={clip.start + clip.duration + 10}
-              aria-valuenow={clip.start + clip.duration}
-              className={`absolute -right-3 top-0 bottom-0 w-6 cursor-ew-resize z-30 flex items-center justify-center group/handle opacity-0 group-hover/item:opacity-100 ${isSelected && "opacity-100"}`}
-              onMouseDown={(e) => handleClipMouseDown(e, "trim-end")}
-            >
-              <div className="w-1 h-6 bg-white rounded-full shadow-sm group-hover/handle:scale-110 transition-transform"></div>
-            </div>
-          </>
-        )}
+      return () => {
+        clearTimeout(timer)
+        window.removeEventListener("click", handleClickOutside)
+        window.removeEventListener("contextmenu", handleClickOutside)
+        window.removeEventListener("keydown", handleKeyDown)
+      }
+    }
+  }, [contextMenu])
 
-        <div className="flex-1 overflow-hidden relative px-2 py-1 flex flex-col justify-center" aria-hidden="true">
-          {isText && clip.textOverlay && (
-            <div className="relative z-10 flex items-center gap-2">
-              <span className="text-[10px] font-medium truncate drop-shadow-md text-purple-100">
-                {clip.textOverlay.text}
-              </span>
-            </div>
-          )}
+  const hasNoClips = clips.length === 0
 
-          {!isText &&
-            !isAudio &&
-            !clip.isAudioDetached &&
-            media?.status === "ready" &&
-            (media.type === "video" ? (
-              clip.duration * zoomLevel > 60 && (
-                <div className="absolute inset-0 flex opacity-20 pointer-events-none">
-                  {[...Array(Math.floor((clip.duration * zoomLevel) / 60))].map((_, i) => (
-                    <div
-                      key={i}
-                      className="w-[60px] h-full border-r border-[var(--border-subtle)] overflow-hidden relative"
-                    >
-                      <video src={media.url} className="w-full h-full object-cover" />
-                    </div>
-                  ))}
-                </div>
-              )
-            ) : media.type === "image" ? (
-              <div className="absolute inset-0 opacity-30 pointer-events-none">
-                <img src={media.url || "/placeholder.svg"} className="w-full h-full object-cover" alt="" />
-              </div>
-            ) : null)}
-
-          {!isText && (
-            <div className="relative z-10 flex items-center gap-2">
-              <span
-                className={`text-[10px] font-medium truncate drop-shadow-md ${isAudio ? "text-emerald-100" : "text-[var(--text-primary)]"}`}
-              >
-                {media?.prompt || "Media"}
-              </span>
-            </div>
-          )}
-
-          {/* Waveform — audio ocupa casi todo el clip (grande, se ven voz y silencios).
-              Video la deja abajo más sutil para no tapar la miniatura. */}
-          {!isText && (
-            <div
-              className={
-                isAudio
-                  ? "absolute inset-x-0 bottom-0 top-4 opacity-95 px-0.5"
-                  : "absolute bottom-0 left-0 right-0 h-1/2 opacity-50 px-0.5"
+  return (
+    <div
+      className={`${className || ""} bg-[var(--surface-0)] flex flex-col shrink-0 select-none relative z-10 transition-none overflow-hidden`}
+      style={style || { height: 320 }}
+      role="region"
+      aria-label="Video timeline"
+      aria-description="Multi-track timeline for video, audio, and text editing"
+    >
+      {/* Toolbar */}
+      <TimelineToolbar
+        currentTime={currentTime}
+        duration={duration}
+        isPlaying={isPlaying}
+        isLooping={isLooping}
+        tool={tool}
+        zoomLevel={zoomLevel}
+        selectedClipCount={selectedClipIds.length}
+        snapConfig={snapConfig}
+        showSnapMenu={showSnapMenu}
+        isRendering={isRendering}
+        renderProgress={renderProgress}
+        renderedPreviewUrl={renderedPreviewUrl}
+        isPreviewStale={isPreviewStale}
+        isPreviewPlayback={isPreviewPlayback}
+        frameRate={frameRate}
+        historyCount={historyCount}
+        futureCount={futureCount}
+        onUndo={onUndo}
+        onRedo={onRedo}
+        onShowShortcuts={onShowShortcuts}
+        onPlayPause={onPlayPause}
+        onSeek={onSeek}
+        onToggleLoop={onToggleLoop}
+        onToolChange={onToolChange}
+        onSplitAtPlayhead={() => {
+          if (selectedClipIds.length > 0) {
+            selectedClipIds.forEach((id) => {
+              const clip = clips.find((c) => c.id === id)
+              if (clip && currentTime > clip.start && currentTime < clip.start + clip.duration) {
+                onSplitClip(id, currentTime)
               }
-            >
-              {media && (
-                <ClipWaveform
-                  mediaUrl={media.url}
-                  duration={clip.duration}
-                  offset={clip.offset}
-                  isAudio={isAudio}
-                  isSelected={isSelected}
+            })
+          }
+        }}
+        onZoomChange={onZoomChange}
+        onToggleSnap={toggleSnapEnabled}
+        onToggleSnapOption={toggleSnapOption}
+        onSetGridInterval={setGridInterval}
+        onSetShowSnapMenu={setShowSnapMenu}
+        onRenderPreview={onRenderPreview}
+        onCancelRender={onCancelRender}
+        onTogglePreviewPlayback={onTogglePreviewPlayback}
+        onAddMarker={onAddMarker}
+        onZoomToFit={onZoomToFit}
+        onDeleteClip={selectedClipIds.length > 0 ? () => onDeleteClip(selectedClipIds) : undefined}
+      />
+
+      <div
+        className={`flex-1 flex overflow-hidden relative ${tool === "razor" ? "cursor-crosshair" : ""}`}
+        id="timeline-wrapper"
+      >
+        {/* Track Headers */}
+        <div
+          ref={headerContainerRef}
+          className="w-32 bg-[var(--surface-0)] border-r border-[var(--border-default)] shrink-0 z-20 flex flex-col pt-8 shadow-[4px_0_15px_-5px_rgba(0,0,0,0.5)] overflow-hidden"
+        >
+          <TimelineTrackHeaders
+            tracks={tracks}
+            hasClips={!hasNoClips}
+            onTrackUpdate={onTrackUpdate}
+            onAddTrack={onAddTrack}
+            onReorderTracks={onReorderTracks}
+          />
+        </div>
+
+        {/* Scrollable Timeline */}
+        <div
+          ref={scrollContainerRef}
+          onScroll={() => {
+            if (headerContainerRef.current && scrollContainerRef.current) {
+              headerContainerRef.current.scrollTop = scrollContainerRef.current.scrollTop
+            }
+          }}
+          className="flex-1 overflow-x-auto overflow-y-auto relative bg-[var(--surface-0)] custom-scrollbar"
+          onMouseDown={(e) => {
+            const target = e.target as HTMLElement
+            if (!target.closest("[data-clip]")) {
+              handleMouseDownBackground(e)
+            }
+          }}
+        >
+          {hasNoClips ? (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="flex flex-col items-center gap-3 text-[var(--text-muted)]">
+                <div className="w-12 h-12 rounded-full bg-[var(--surface-2)] flex items-center justify-center">
+                  <FilmIcon className="w-6 h-6" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-medium text-[var(--text-secondary)]">No clips yet</p>
+                  <p className="text-xs mt-1 text-[var(--text-tertiary)]">
+                    Drag media from the library or generate content to get started
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Canvas Ruler */}
+              <TimelineRuler
+                duration={duration}
+                zoomLevel={zoomLevel}
+                scrollContainerRef={scrollContainerRef}
+                onClick={(time) => onSeek(time)}
+              />
+
+              {/* Timeline Markers overlay */}
+              {markers.length > 0 && onMarkerClick && onMarkerDelete && onMarkerUpdate && (
+                <TimelineMarkers
+                  markers={markers}
                   zoomLevel={zoomLevel}
+                  scrollLeft={scrollLeft}
+                  viewportWidth={viewportWidth}
+                  onMarkerClick={onMarkerClick}
+                  onMarkerDoubleClick={(marker) => onMarkerUpdate(marker.id, {})}
+                  onMarkerDelete={onMarkerDelete}
+                  onMarkerUpdate={onMarkerUpdate}
                 />
               )}
-            </div>
+
+              {/* Tracks Render */}
+              <div className="min-w-full relative" style={{ width: `${totalWidth}px` }}>
+                {/* Playhead Line (Interactive) */}
+                <div
+                  className="absolute top-0 bottom-0 z-50 group/playhead"
+                  style={{ left: `${currentTime * zoomLevel}px` }}
+                >
+                  {/* Hit Area */}
+                  <div
+                    className="absolute -left-2 w-4 h-full cursor-ew-resize z-50"
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      e.preventDefault()
+                      setIsDraggingPlayhead(true)
+                    }}
+                  />
+                  {/* Visual Line */}
+                  <div
+                    className={`absolute left-0 w-px h-full bg-[var(--accent-primary)] pointer-events-none ${
+                      isDraggingPlayhead ? "bg-white shadow-[0_0_8px_white]" : ""
+                    }`}
+                  />
+                  {/* Head/Handle */}
+                  <div
+                    className={`absolute -left-[5.5px] top-0 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] pointer-events-none transition-colors ${
+                      isDraggingPlayhead
+                        ? "border-t-white"
+                        : "border-t-[var(--accent-primary)] group-hover/playhead:border-t-[var(--accent-text)]"
+                    }`}
+                  />
+                </div>
+
+                {/* Snap Indicator Line */}
+                {snapIndicator !== null && (
+                  <div
+                    className="absolute top-0 bottom-0 w-[1px] bg-yellow-400 z-50 pointer-events-none shadow-[0_0_8px_rgba(250,204,21,0.5)]"
+                    style={{ left: `${snapIndicator * zoomLevel}px` }}
+                  />
+                )}
+
+                {/* Marquee Selection Box */}
+                {selectionBox && (
+                  <div
+                    className="absolute z-[60] bg-[var(--accent-primary)]/20 border border-[var(--accent-muted)] pointer-events-none"
+                    style={{
+                      left: selectionBox.x,
+                      top: selectionBox.y,
+                      width: selectionBox.w,
+                      height: selectionBox.h,
+                    }}
+                  />
+                )}
+
+                {/* Track Rows */}
+                {tracks.map((track) => {
+                  const trackClips = visibleClipsByTrack[track.id] || []
+                  const isAudio = track.type === "audio"
+                  const isText = track.type === "text"
+                  const trackHeight = isAudio ? "h-16" : isText ? "h-12" : "h-24"
+
+                  return (
+                    <div
+                      key={track.id}
+                      className={`${trackHeight} border-b border-[var(--border-subtle)] relative group/track bg-[var(--surface-0)]`}
+                      onDoubleClick={(e) => handleTrackDoubleClick(e, track)}
+                    >
+                      <div
+                        className="absolute inset-0 bg-[linear-gradient(90deg,transparent_99%,var(--border-subtle)_100%)] opacity-10 pointer-events-none"
+                        style={{ backgroundSize: `${zoomLevel}px 100%` }}
+                      />
+
+                      {trackClips.map((clip, index) => {
+                        const media = mediaMap[clip.mediaId]
+                        const isSelected = selectedClipIds.includes(clip.id)
+
+                        return (
+                          <TimelineClipItem
+                            key={clip.id}
+                            clip={clip}
+                            media={media}
+                            track={track}
+                            zoomLevel={zoomLevel}
+                            isSelected={isSelected}
+                            tool={tool}
+                            onMouseDown={(e, mode) => handleMouseDownClip(e, clip, mode)}
+                            onContextMenu={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              setContextMenu({ x: e.clientX, y: e.clientY, clipId: clip.id })
+                              if (!selectedClipIds.includes(clip.id)) {
+                                onSelectClips([clip.id])
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              // existing key handling
+                            }}
+                            tabIndex={index === 0 ? 0 : -1}
+                          />
+                        )
+                      })}
+                    </div>
+                  )
+                })}
+
+                {/* Extra space at bottom */}
+                <div className="h-40" />
+              </div>
+            </>
           )}
         </div>
-      </div>
-    )
-  },
-)
 
-TimelineClipItem.displayName = "TimelineClipItem"
+        {/* ── Barra desplazadora horizontal (arrastrar para moverse de lado a lado) ── */}
+        {totalWidth > viewportWidth && viewportWidth > 0 && (
+          <div className="h-3 bg-[var(--surface-1)] border-t border-[var(--border-default)] relative select-none shrink-0">
+            <div
+              className="absolute top-0.5 bottom-0.5 bg-[var(--text-tertiary)] hover:bg-[var(--text-secondary)] rounded-full cursor-grab active:cursor-grabbing transition-colors"
+              style={{
+                left: `${(scrollLeft / totalWidth) * 100}%`,
+                width: `${Math.max(8, (viewportWidth / totalWidth) * 100)}%`,
+              }}
+              onMouseDown={(e) => {
+                e.preventDefault()
+                const startX = e.clientX
+                const startScroll = scrollContainerRef.current?.scrollLeft || 0
+                const trackWidth = (e.currentTarget.parentElement as HTMLElement).clientWidth
+                const onMove = (ev: MouseEvent) => {
+                  const dx = ev.clientX - startX
+                  const ratio = totalWidth / trackWidth
+                  if (scrollContainerRef.current) {
+                    scrollContainerRef.current.scrollLeft = startScroll + dx * ratio
+                  }
+                }
+                const onUp = () => {
+                  window.removeEventListener("mousemove", onMove)
+                  window.removeEventListener("mouseup", onUp)
+                }
+                window.addEventListener("mousemove", onMove)
+                window.addEventListener("mouseup", onUp)
+              }}
+            />
+          </div>
+        )}
+        {contextMenu && (
+          <TimelineContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            clipId={contextMenu.clipId}
+            clips={clips}
+            tracks={tracks}
+            currentTime={currentTime}
+            selectedClipIds={selectedClipIds}
+            onSplitClip={onSplitClip}
+            onDuplicateClip={onDuplicateClip}
+            onDetachAudio={onDetachAudio}
+            onRippleDeleteClip={onRippleDeleteClip}
+            onDeleteClip={onDeleteClip}
+            onExportAudio={onExportAudio}
+            onClose={() => setContextMenu(null)}
+          />
+        )}
+      </div>
+
+      {/* Barra de desplazamiento horizontal propia: agarre grande con ancho
+          mínimo (44px) para que sea fácil de agarrar aun en videos largos. */}
+      {!hasNoClips && totalWidth > viewportWidth + 1 && (() => {
+        const track = Math.max(0, viewportWidth)
+        const thumbW = Math.max(44, Math.min(track, track * (viewportWidth / totalWidth)))
+        const maxScroll = totalWidth - viewportWidth
+        const maxThumb = track - thumbW
+        const thumbLeft = maxScroll > 0 ? Math.min(maxThumb, (scrollLeft / maxScroll) * maxThumb) : 0
+        return (
+          <div className="shrink-0 flex bg-[var(--surface-0)] border-t border-[var(--border-default)]">
+            <div className="w-32 shrink-0" />
+            <div
+              className="relative flex-1 h-4 py-[4px] cursor-pointer"
+              onMouseDown={(e) => {
+                if (!scrollContainerRef.current || maxThumb <= 0) return
+                const barRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                const clickX = e.clientX - barRect.left
+                if (clickX < thumbLeft || clickX > thumbLeft + thumbW) {
+                  const target = Math.min(maxThumb, Math.max(0, clickX - thumbW / 2))
+                  scrollContainerRef.current.scrollLeft = (target / maxThumb) * maxScroll
+                }
+              }}
+            >
+              <div
+                className="absolute top-[4px] h-2 rounded-full bg-[var(--text-muted)] hover:bg-[var(--text-secondary)] active:bg-[var(--accent-primary)] transition-colors"
+                style={{ left: `${thumbLeft}px`, width: `${thumbW}px` }}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (!scrollContainerRef.current || maxThumb <= 0) return
+                  const startX = e.clientX
+                  const startScroll = scrollContainerRef.current.scrollLeft
+                  const move = (ev: MouseEvent) => {
+                    if (!scrollContainerRef.current) return
+                    const dx = ev.clientX - startX
+                    const next = startScroll + (dx / maxThumb) * maxScroll
+                    scrollContainerRef.current.scrollLeft = Math.min(maxScroll, Math.max(0, next))
+                  }
+                  const up = () => {
+                    window.removeEventListener("mousemove", move)
+                    window.removeEventListener("mouseup", up)
+                  }
+                  window.addEventListener("mousemove", move)
+                  window.addEventListener("mouseup", up)
+                }}
+              />
+            </div>
+          </div>
+        )
+      })()}
+    </div>
+  )
+})
