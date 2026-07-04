@@ -37,7 +37,8 @@ interface CancelMessage {
 
 type WorkerMessage = StartMessage | CancelMessage
 
-const TARGET_FPS = 30
+const TARGET_FPS = 24 // Debe coincidir con el servidor (ensure_export_ready normaliza a 24fps).
+                      // Si no coincide, isExportReady falla y re-codifica TODO (export lentísimo).
 
 let ffmpeg: FFmpeg | null = null
 let cancelled = false
