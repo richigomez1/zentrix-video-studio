@@ -1,0 +1,297 @@
+"use client"
+
+/* ═══════════════════════════════════════════════════════════════════
+   WebCodecs — Prueba de velocidad (Paso 1)
+   Mide qué tan rápido codifica H.264 el Chrome de esta máquina usando
+   el hardware (GPU). NO toca nada de la app. NO usa dependencias nuevas.
+   Objetivo: obtener el número que decide si vale la pena reescribir el
+   export con WebCodecs.
+   Ruta sugerida en el repo: app/webcodecs-test/page.tsx
+   ═══════════════════════════════════════════════════════════════════ */
+
+import { useState, useCallback } from "react"
+
+interface BenchResult {
+  label: string
+  width: number
+  height: number
+  totalFrames: number
+  elapsed: number
+  encFps: number
+  supported: boolean
+  hwPref: string
+  note?: string
+}
+
+const CODEC_CANDIDATES = [
+  "avc1.42E01F", // H.264 Baseline 3.1
+  "avc1.4D401F", // H.264 Main 3.1
+  "avc1.640028", // H.264 High 4.0 (mejor para 1080p)
+]
+
+export default function WebCodecsTestPage() {
+  const [logs, setLogs] = useState<string[]>([])
+  const [running, setRunning] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [results, setResults] = useState<BenchResult[]>([])
+  const [verdict, setVerdict] = useState<string>("")
+
+  const log = useCallback((msg: string) => {
+    setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()}  ${msg}`])
+  }, [])
+
+  /* Encuentra un códec H.264 soportado (con preferencia por hardware). */
+  const findConfig = useCallback(
+    async (width: number, height: number, fps: number) => {
+      for (const codec of CODEC_CANDIDATES) {
+        for (const hw of ["prefer-hardware", "no-preference"] as const) {
+          const config: VideoEncoderConfig = {
+            codec,
+            width,
+            height,
+            bitrate: height >= 1080 ? 8_000_000 : 5_000_000,
+            framerate: fps,
+            hardwareAcceleration: hw,
+          }
+          try {
+            const sup = await VideoEncoder.isConfigSupported(config)
+            if (sup.supported) {
+              log(`✓ Soportado: ${codec} @ ${width}x${height} (${hw})`)
+              return { config, hw }
+            }
+          } catch {
+            /* sigue probando */
+          }
+        }
+      }
+      return null
+    },
+    [log],
+  )
+
+  /* Codifica N cuadros sintéticos y mide el tiempo real. */
+  const benchmark = useCallback(
+    async (label: string, width: number, height: number, fps: number, seconds: number): Promise<BenchResult> => {
+      const totalFrames = fps * seconds
+      const found = await findConfig(width, height, fps)
+      if (!found) {
+        return { label, width, height, totalFrames: 0, elapsed: 0, encFps: 0, supported: false, hwPref: "-", note: "No soportado" }
+      }
+
+      let encoded = 0
+      let encError = ""
+      const encoder = new VideoEncoder({
+        output: () => {
+          encoded++
+        },
+        error: (e: DOMException) => {
+          encError = e.message
+        },
+      })
+      encoder.configure(found.config)
+
+      const canvas = document.createElement("canvas")
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext("2d")!
+
+      log(`▶ Codificando ${totalFrames} cuadros a ${width}x${height}...`)
+      const start = performance.now()
+
+      for (let i = 0; i < totalFrames; i++) {
+        // Dibujamos algo que CAMBIA en cada cuadro para que el encoder trabaje de verdad
+        ctx.fillStyle = `hsl(${i % 360}, 70%, 45%)`
+        ctx.fillRect(0, 0, width, height)
+        ctx.fillStyle = "white"
+        ctx.fillRect((i * 11) % width, (i * 7) % height, Math.round(width / 5), Math.round(height / 5))
+        ctx.fillStyle = "black"
+        ctx.font = `${Math.round(height / 6)}px sans-serif`
+        ctx.fillText(String(i), 30, height / 2)
+
+        const frame = new VideoFrame(canvas, { timestamp: Math.round((i * 1e6) / fps), duration: Math.round(1e6 / fps) })
+        encoder.encode(frame, { keyFrame: i % 48 === 0 })
+        frame.close()
+
+        // Evita acumular presión: deja que el encoder drene si se llena la cola
+        if (encoder.encodeQueueSize > 30) {
+          await new Promise((r) => setTimeout(r, 0))
+        }
+        if (i % 24 === 0) setProgress(i / totalFrames)
+        if (encError) break
+      }
+
+      await encoder.flush()
+      const elapsed = (performance.now() - start) / 1000
+      encoder.close()
+      setProgress(1)
+
+      if (encError) {
+        return { label, width, height, totalFrames, elapsed, encFps: 0, supported: false, hwPref: found.hw, note: `Error: ${encError}` }
+      }
+
+      const encFps = encoded / elapsed
+      log(`✓ ${label}: ${encoded} cuadros en ${elapsed.toFixed(1)}s → ${encFps.toFixed(0)} cuadros/seg`)
+      return { label, width, height, totalFrames, elapsed, encFps, supported: true, hwPref: found.hw }
+    },
+    [findConfig, log],
+  )
+
+  const run = useCallback(async () => {
+    setRunning(true)
+    setLogs([])
+    setResults([])
+    setVerdict("")
+    setProgress(0)
+
+    try {
+      if (typeof window === "undefined" || !("VideoEncoder" in window)) {
+        log("❌ Este navegador NO soporta WebCodecs (VideoEncoder). Prueba en Chrome/Edge actualizado.")
+        setVerdict("no-soporta")
+        setRunning(false)
+        return
+      }
+      log("Navegador con WebCodecs detectado. Empezando prueba...")
+
+      const res: BenchResult[] = []
+      // 10 segundos de video a 24fps en 720p y 1080p (suficiente para medir bien)
+      res.push(await benchmark("720p", 1280, 720, 24, 10))
+      setResults([...res])
+      res.push(await benchmark("1080p", 1920, 1080, 24, 10))
+      setResults([...res])
+
+      // Veredicto basado en el 720p (tu resolución principal)
+      const main = res.find((r) => r.label === "720p")
+      if (main && main.supported && main.encFps > 0) {
+        // Video de 12 min a 24fps = 17280 cuadros
+        const framesFor12min = 12 * 60 * 24
+        const estEncode = framesFor12min / main.encFps
+        log(`📊 Estimación pura de codificación para 12 min (720p): ~${estEncode.toFixed(0)} segundos`)
+        log("   (El export real suma descarga de clips + unión de audio, así que será algo más.)")
+        if (main.encFps >= 120) setVerdict("excelente")
+        else if (main.encFps >= 48) setVerdict("bien")
+        else setVerdict("lento")
+      } else {
+        setVerdict("no-soporta")
+      }
+    } catch (e) {
+      log(`❌ Error inesperado: ${e instanceof Error ? e.message : String(e)}`)
+      setVerdict("error")
+    } finally {
+      setRunning(false)
+    }
+  }, [benchmark, log])
+
+  const verdictBox = () => {
+    if (!verdict) return null
+    const map: Record<string, { color: string; title: string; text: string }> = {
+      excelente: {
+        color: "#16a34a",
+        title: "🚀 EXCELENTE — WebCodecs vale totalmente la pena",
+        text: "Tu Chrome codifica muy rápido (hay aceleración por hardware). Un export de 12 min sería de segundos a ~1-2 min. Seguimos con la reescritura completa.",
+      },
+      bien: {
+        color: "#2563eb",
+        title: "✅ BIEN — vale la pena",
+        text: "Tu Chrome codifica a buena velocidad. WebCodecs sería claramente más rápido que el export actual. Seguimos.",
+      },
+      lento: {
+        color: "#d97706",
+        title: "⚠️ LENTO — probablemente sin hardware",
+        text: "La codificación va lenta, señal de que este Chrome no está usando la GPU. WebCodecs no daría gran ventaja aquí. Mejor quedarnos con el crossfade inteligente en wasm.",
+      },
+      "no-soporta": {
+        color: "#dc2626",
+        title: "❌ No soporta WebCodecs",
+        text: "Este navegador no puede codificar con WebCodecs. Usa Chrome o Edge actualizado, o nos quedamos con el export actual.",
+      },
+      error: {
+        color: "#dc2626",
+        title: "❌ Error durante la prueba",
+        text: "Algo falló. Mándame el registro de abajo y lo revisamos.",
+      },
+    }
+    const v = map[verdict]
+    return (
+      <div style={{ marginTop: 20, padding: 16, borderRadius: 10, border: `2px solid ${v.color}`, background: `${v.color}18` }}>
+        <div style={{ fontWeight: 700, fontSize: 16, color: v.color }}>{v.title}</div>
+        <div style={{ marginTop: 6, fontSize: 14, color: "#e5e5e5" }}>{v.text}</div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#0a0a0a", color: "#e5e5e5", padding: 24, fontFamily: "system-ui, sans-serif" }}>
+      <div style={{ maxWidth: 720, margin: "0 auto" }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>WebCodecs — Prueba de velocidad</h1>
+        <p style={{ fontSize: 14, color: "#a3a3a3", marginBottom: 20 }}>
+          Mide qué tan rápido codifica video tu Chrome usando el hardware de esta máquina. No toca tu app. Tarda ~1-2 minutos.
+        </p>
+
+        <button
+          onClick={run}
+          disabled={running}
+          style={{
+            padding: "12px 24px",
+            borderRadius: 8,
+            border: "none",
+            background: running ? "#404040" : "#005B5B",
+            color: "white",
+            fontSize: 15,
+            fontWeight: 600,
+            cursor: running ? "default" : "pointer",
+          }}
+        >
+          {running ? `Probando... ${Math.round(progress * 100)}%` : "▶ Iniciar prueba"}
+        </button>
+
+        {verdictBox()}
+
+        {results.length > 0 && (
+          <table style={{ width: "100%", marginTop: 20, borderCollapse: "collapse", fontSize: 14 }}>
+            <thead>
+              <tr style={{ textAlign: "left", color: "#a3a3a3" }}>
+                <th style={{ padding: 8, borderBottom: "1px solid #333" }}>Resolución</th>
+                <th style={{ padding: 8, borderBottom: "1px solid #333" }}>Cuadros/seg</th>
+                <th style={{ padding: 8, borderBottom: "1px solid #333" }}>Tiempo</th>
+                <th style={{ padding: 8, borderBottom: "1px solid #333" }}>Hardware</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.map((r) => (
+                <tr key={r.label}>
+                  <td style={{ padding: 8, borderBottom: "1px solid #222" }}>{r.label}</td>
+                  <td style={{ padding: 8, borderBottom: "1px solid #222", fontWeight: 700 }}>
+                    {r.supported ? `${r.encFps.toFixed(0)}` : "—"}
+                  </td>
+                  <td style={{ padding: 8, borderBottom: "1px solid #222" }}>{r.supported ? `${r.elapsed.toFixed(1)}s` : "—"}</td>
+                  <td style={{ padding: 8, borderBottom: "1px solid #222" }}>{r.note || r.hwPref}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {logs.length > 0 && (
+          <div
+            style={{
+              marginTop: 20,
+              padding: 12,
+              background: "#111",
+              borderRadius: 8,
+              fontFamily: "monospace",
+              fontSize: 12,
+              color: "#9ca3af",
+              maxHeight: 260,
+              overflowY: "auto",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {logs.map((l, i) => (
+              <div key={i}>{l}</div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
