@@ -665,8 +665,13 @@ export const ProductionPanel = memo(function ProductionPanel({
     setStatusMsg(`🎞 Ken Burns "${label}" aplicado a ${count} escenas`)
   }, [])
 
-  // ── Scene State Persistence (localStorage per chapter) ──
-  const SCENE_STORAGE_KEY = chapterId ? `zentrix_prod_scenes_${chapterId}` : ""
+  // ── Scene State Persistence (localStorage per chapter + firma de contenido) ──
+  // La firma incluye nº de escenas + inicio del texto de la 1ª escena. Si el contenido del
+  // capítulo cambia (o es otro capítulo), la llave cambia y NO se cargan datos viejos/envenenados.
+  const contentSig = chapterData
+    ? `${chapterData.scenes?.length || 0}_${(chapterData.scenes?.[0]?.text_excerpt || "").slice(0, 24).replace(/\s/g, "")}`
+    : ""
+  const SCENE_STORAGE_KEY = chapterId ? `zentrix_prod_scenes_${chapterId}_${contentSig}` : ""
 
   const saveScenesToStorage = useCallback((scenesToSave: SceneState[]) => {
     if (!SCENE_STORAGE_KEY) return
@@ -722,8 +727,8 @@ export const ProductionPanel = memo(function ProductionPanel({
           motionPrompt: saved?.motionPrompt || "",
           classification: saved?.classification || "",
           kbConfig: saved?.kbConfig || { ...KB_DEFAULT },
-          status: s.video_url ? "done" as const : (saved?.status === "done" && saved?.videoUrl) ? "done" as const : "pending" as const,
-          videoUrl: s.video_url || saved?.videoUrl || null,
+          status: s.video_url ? "done" as const : "pending" as const,
+          videoUrl: s.video_url || null,
           errorMsg: "",
           volume: saved?.volume ?? 100,
           jobId: saved?.jobId || null,
