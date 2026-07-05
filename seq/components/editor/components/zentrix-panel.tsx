@@ -63,10 +63,19 @@ export interface TimingEntry {
   duration: number
 }
 
+/* Las dos alas separadas: cada capítulo viene de UNA de ellas. */
+export type ZentrixSource = "image-studio" | "storyboard"
+
+export const SOURCE_META: Record<ZentrixSource, { label: string; icon: string; note: string }> = {
+  "image-studio": { label: "Image Studio", icon: "🖼", note: "Documental · sin personajes fijos" },
+  "storyboard": { label: "Storyboard", icon: "🎭", note: "Serie con elenco · personajes" },
+}
+
 export interface ZentrixChapterWithTiming {
   data: ZentrixEditorData
   timing: TimingEntry[] | null
   chapterId: string
+  source: ZentrixSource
 }
 
 export interface ZentrixPanelProps {
@@ -132,6 +141,7 @@ function ChapterSelector({
   onLoad: (result: ZentrixChapterWithTiming) => void
   onLogout: () => void
 }) {
+  const [source, setSource] = useState<ZentrixSource>("image-studio")
   const [projects, setProjects] = useState<ZentrixProject[]>([])
   const [chapters, setChapters] = useState<ZentrixChapter[]>([])
   const [selProject, setSelProject] = useState("")
@@ -141,21 +151,23 @@ function ChapterSelector({
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
 
+  // Al cambiar de ala se limpia la selección y se recargan los proyectos de ESA ala.
   useEffect(() => {
-    apiFetch("/api/image-studio/projects", token)
+    setProjects([]); setChapters([]); setSelProject(""); setSelChapter(""); setError("")
+    apiFetch(`/api/${source}/projects`, token)
       .then((d) => setProjects(Array.isArray(d) ? d : d.projects || []))
       .catch((e) => setError(e.message))
-  }, [token])
+  }, [token, source])
 
   useEffect(() => {
     if (!selProject) { setChapters([]); setSelChapter(""); return }
     setLoadingChapters(true)
     setSelChapter("")
-    apiFetch(`/api/image-studio/projects/${selProject}`, token)
+    apiFetch(`/api/${source}/projects/${selProject}`, token)
       .then((d) => setChapters(d.chapters || []))
       .catch((e) => setError(e.message))
       .finally(() => setLoadingChapters(false))
-  }, [selProject, token])
+  }, [selProject, token, source])
 
   const handleLoad = async () => {
     if (!selChapter) return
@@ -164,9 +176,9 @@ function ChapterSelector({
     setStatus("📥 Cargando datos del capítulo...")
 
     try {
-      // Step 1: Get chapter data from backend
+      // Step 1: Get chapter data from the CURRENT ala (image-studio o storyboard)
       const data: ZentrixEditorData = await apiFetch(
-        `/api/image-studio/chapters/${selChapter}/editor-data`,
+        `/api/${source}/chapters/${selChapter}/editor-data`,
         token,
       )
 
@@ -205,7 +217,7 @@ function ChapterSelector({
         }
       }
 
-      onLoad({ data, timing, chapterId: selChapter })
+      onLoad({ data, timing, chapterId: selChapter, source })
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Error al cargar")
     } finally {
@@ -217,13 +229,33 @@ function ChapterSelector({
   return (
     <div className="flex flex-col gap-3 p-4">
       <div className="flex items-center justify-between">
-        <div className="text-xs font-semibold text-white">📂 Image Studio</div>
+        <div className="text-xs font-semibold text-white">📂 Cargar capítulo</div>
         <button
           onClick={onLogout}
           className="text-[10px] text-[var(--text-tertiary)] hover:text-red-400 transition-colors"
         >
           Cerrar sesión
         </button>
+      </div>
+
+      {/* Selector de ALA — cada una es independiente */}
+      <div className="grid grid-cols-2 gap-1.5 p-1 bg-[var(--surface-2)] rounded-lg">
+        {(Object.keys(SOURCE_META) as ZentrixSource[]).map((s) => {
+          const meta = SOURCE_META[s]
+          const active = source === s
+          return (
+            <button
+              key={s}
+              onClick={() => setSource(s)}
+              className={`flex flex-col items-center gap-0.5 rounded-md px-2 py-2 transition-colors ${
+                active ? "bg-indigo-600 text-white" : "text-[var(--text-tertiary)] hover:text-white"
+              }`}
+            >
+              <span className="text-sm">{meta.icon} <span className="text-xs font-medium">{meta.label}</span></span>
+              <span className="text-[9px] opacity-80 leading-tight text-center">{meta.note}</span>
+            </button>
+          )
+        })}
       </div>
 
       <div>
@@ -291,6 +323,7 @@ function ChapterSelector({
 /* ── Loaded Chapter Info ── */
 function LoadedInfo({
   data,
+  source,
   hasTiming,
   onLoadAnother,
   onClear,
@@ -300,6 +333,7 @@ function LoadedInfo({
   isRefreshing,
 }: {
   data: ZentrixEditorData
+  source: ZentrixSource
   hasTiming: boolean
   onLoadAnother: () => void
   onClear: () => void
@@ -315,6 +349,9 @@ function LoadedInfo({
     <div className="flex flex-col gap-3 p-4">
       <div className="flex items-center justify-between">
         <div className="text-xs font-semibold text-green-400">✅ Capítulo cargado</div>
+        <span className="text-[9px] px-2 py-0.5 rounded-full bg-indigo-600/30 text-indigo-300 border border-indigo-700">
+          {SOURCE_META[source].icon} {SOURCE_META[source].label}
+        </span>
       </div>
       <div className="bg-[var(--surface-2)] rounded-lg p-3 space-y-2">
         <div className="text-sm font-medium text-white">{data.project_name}</div>
@@ -361,8 +398,8 @@ function LoadedInfo({
         </button>
       )}
 
-      {/* Delete all videos */}
-      {videoCount > 0 && onDeleteAllVideos && (
+      {/* Delete all videos — solo Image Studio (Storyboard aún no tiene ese endpoint) */}
+      {videoCount > 0 && source === "image-studio" && onDeleteAllVideos && (
         <button
           onClick={() => {
             if (window.confirm("¿Borrar TODOS los videos de este capítulo? Las imágenes se mantienen.")) {
@@ -400,6 +437,7 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter,
   const [loginError, setLoginError] = useState("")
   const [loadedData, setLoadedData] = useState<ZentrixEditorData | null>(null)
   const [loadedChapterId, setLoadedChapterId] = useState<string | null>(null)
+  const [loadedSource, setLoadedSource] = useState<ZentrixSource>("image-studio")
   const [hasTiming, setHasTiming] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
 
@@ -427,6 +465,7 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter,
     (result: ZentrixChapterWithTiming) => {
       setLoadedData(result.data)
       setLoadedChapterId(result.chapterId)
+      setLoadedSource(result.source)
       setHasTiming(!!result.timing)
       onLoadChapter(result)
     },
@@ -438,33 +477,34 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter,
     setIsRefreshing(true)
     try {
       const data: ZentrixEditorData = await apiFetch(
-        `/api/image-studio/chapters/${loadedChapterId}/editor-data`,
+        `/api/${loadedSource}/chapters/${loadedChapterId}/editor-data`,
         token,
       )
       setLoadedData(data)
-      onLoadChapter({ data, timing: null, chapterId: loadedChapterId })
+      onLoadChapter({ data, timing: null, chapterId: loadedChapterId, source: loadedSource })
     } catch (e: unknown) {
       console.error("Refresh failed:", e)
     } finally {
       setIsRefreshing(false)
     }
-  }, [loadedChapterId, token, onLoadChapter])
+  }, [loadedChapterId, token, loadedSource, onLoadChapter])
 
   const handleDeleteAllVideos = useCallback(async () => {
     if (!loadedChapterId || !token) return
+    // Solo Image Studio tiene borrado masivo de videos por ahora.
+    if (loadedSource !== "image-studio") return
     try {
       await apiFetch(`/api/image-studio/chapters/${loadedChapterId}/all-videos`, token, { method: "DELETE" })
-      // Refresh data after deletion
       const data: ZentrixEditorData = await apiFetch(
-        `/api/image-studio/chapters/${loadedChapterId}/editor-data`,
+        `/api/${loadedSource}/chapters/${loadedChapterId}/editor-data`,
         token,
       )
       setLoadedData(data)
-      onLoadChapter({ data, timing: null, chapterId: loadedChapterId })
+      onLoadChapter({ data, timing: null, chapterId: loadedChapterId, source: loadedSource })
     } catch (e: unknown) {
       console.error("Delete videos failed:", e)
     }
-  }, [loadedChapterId, token, onLoadChapter])
+  }, [loadedChapterId, token, loadedSource, onLoadChapter])
 
   return (
     <div className="flex h-full w-[320px] flex-col border-r border-[var(--border-default)] bg-[var(--surface-0)]">
@@ -482,7 +522,7 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter,
         {!token ? (
           <LoginForm onLogin={handleLogin} error={loginError} />
         ) : loadedData ? (
-          <LoadedInfo data={loadedData} hasTiming={hasTiming} onLoadAnother={() => { setLoadedData(null); setLoadedChapterId(null); }} onClear={() => { setLoadedData(null); setLoadedChapterId(null); onClearProject(); }} onOpenProduction={onOpenProduction} onRefreshVideos={handleRefreshVideos} onDeleteAllVideos={handleDeleteAllVideos} isRefreshing={isRefreshing} />
+          <LoadedInfo data={loadedData} source={loadedSource} hasTiming={hasTiming} onLoadAnother={() => { setLoadedData(null); setLoadedChapterId(null); }} onClear={() => { setLoadedData(null); setLoadedChapterId(null); onClearProject(); }} onOpenProduction={onOpenProduction} onRefreshVideos={handleRefreshVideos} onDeleteAllVideos={handleDeleteAllVideos} isRefreshing={isRefreshing} />
         ) : (
           <ChapterSelector token={token} onLoad={handleLoad} onLogout={handleLogout} />
         )}
@@ -490,7 +530,7 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter,
 
       <div className="border-t border-[var(--border-default)] px-4 py-2">
         <div className="text-[9px] text-[var(--text-tertiary)] text-center">
-          {token ? "🟢 Conectado a Image Studio" : "🔴 No conectado"}
+          {token ? "🟢 Conectado a Zentrix" : "🔴 No conectado"}
         </div>
       </div>
     </div>
