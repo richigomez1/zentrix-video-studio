@@ -33,6 +33,7 @@ const MODELS: ModelInfo[] = [
   { id: "veo-3.1-lite-generate-preview", name: "Veo Lite", durations: [5, 8], price720: 0.05, price1080: 0.08, emoji: "✨", tier: "$$" },
   { id: "veo-3.1-fast-generate-preview", name: "Veo Fast", durations: [5, 8], price720: 0.10, price1080: 0.12, emoji: "🚀", tier: "$$$" },
   { id: "veo-3.1-generate-preview", name: "Veo Full", durations: [5, 8], price720: 0.40, price1080: 0.40, emoji: "💎", tier: "$$$$" },
+  { id: "omni-flash", name: "Omni Flash", durations: [4, 6, 8], price720: 0.10, price1080: 0.18, emoji: "🌟", tier: "$$$" },
 ]
 
 const MODEL_MAP = Object.fromEntries(MODELS.map((m) => [m.id, m]))
