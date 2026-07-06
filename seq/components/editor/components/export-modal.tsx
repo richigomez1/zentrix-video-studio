@@ -176,7 +176,7 @@ export const ExportModal = memo(function ExportModal({
             index: vid.segment_index,
             videoUrl: url,
             duration: vid.duration || 8,
-            volume: vid.volume ?? 30,
+            volume: vid.volume ?? 10,
             meta: vid.veo_url ? vid.veo_meta : vid.kb_meta,
           })
         }
