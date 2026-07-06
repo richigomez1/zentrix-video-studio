@@ -238,6 +238,7 @@ function SceneCard({
   onGenerate,
   onCancel,
   onDelete,
+  onOmniTest,
 }: {
   scene: SceneState
   sceneData: ZentrixScene
@@ -249,6 +250,7 @@ function SceneCard({
   onGenerate: () => void
   onCancel: () => void
   onDelete: () => void
+  onOmniTest: () => void
 }) {
   const cost = getPrice(scene.model, scene.duration, scene.resolution)
   const hasPrompt = scene.motionPrompt.trim().length > 0
@@ -598,6 +600,13 @@ function SceneCard({
             ✕ Cancelar
           </button>
         )}
+        <button
+          onClick={onOmniTest}
+          title="Prueba aislada con Gemini Omni Flash (no toca el flujo normal)"
+          className="px-2 py-1 text-[9px] font-medium text-purple-300 border border-purple-700 hover:bg-purple-900/30 rounded-lg transition-colors"
+        >
+          🧪 Omni
+        </button>
       </div>
     </div>
   )
@@ -612,6 +621,8 @@ export const ProductionPanel = memo(function ProductionPanel({
   onVideoGenerated,
 }: ProductionPanelProps) {
   const [scenes, setScenes] = useState<SceneState[]>([])
+  const [masterVol, setMasterVol] = useState<number>(10)   // volumen maestro del audio de TODOS los videos (%)
+  const [narrationVol, setNarrationVol] = useState<number>(100)   // volumen de la narración (voz) (%)
   const [globalModel, setGlobalModel] = useState("ken-burns")
   const [globalResolution, setGlobalResolution] = useState<Resolution>("720p")
   const [activeTier, setActiveTier] = useState<TierName | "manual" | null>(null)
@@ -730,7 +741,7 @@ export const ProductionPanel = memo(function ProductionPanel({
           status: s.video_url ? "done" as const : "pending" as const,
           videoUrl: s.video_url || null,
           errorMsg: "",
-          volume: saved?.volume ?? 100,
+          volume: saved?.volume ?? 10,
           jobId: saved?.jobId || null,
         }
       })
@@ -927,6 +938,36 @@ export const ProductionPanel = memo(function ProductionPanel({
   }, [chapterId])
 
   /* ── Generate single scene ── */
+  // 🧪 Prueba aislada de Gemini Omni Flash — no toca el flujo normal de generación.
+  const omniTestScene = useCallback(async (sceneIndex: number) => {
+    if (!chapterId) return
+    try {
+      setStatusMsg(`🧪 Omni: generando prueba de la escena ${sceneIndex + 1}... (puede tardar)`)
+      const start = await apiFetch(`/api/omni-test/chapters/${chapterId}/scene/${sceneIndex}`, {
+        method: "POST",
+        body: JSON.stringify({ duration: 8, resolution: "720p" }),
+      })
+      const jobId = start.job_id
+      // Sondear hasta que termine
+      for (let i = 0; i < 150; i++) {
+        await new Promise((r) => setTimeout(r, 4000))
+        const st = await apiFetch(`/api/omni-test/jobs/${jobId}`)
+        if (st.status === "done" && st.video_url) {
+          setStatusMsg(`🧪 Omni ✅ escena ${sceneIndex + 1} — ${st.cost_note || ""}`)
+          window.open(st.video_url, "_blank")
+          return
+        }
+        if (st.status === "error") {
+          setStatusMsg(`🧪 Omni ❌ escena ${sceneIndex + 1}: ${st.cost_note || "error"}`)
+          return
+        }
+      }
+      setStatusMsg(`🧪 Omni: la prueba tardó demasiado. Revisa los logs de Render.`)
+    } catch (e: any) {
+      setStatusMsg(`🧪 Omni ❌ ${e?.message || e}`)
+    }
+  }, [chapterId, scenes])
+
   const generateScene = useCallback(async (sceneIndex: number) => {
     if (!chapterId) return
     const scene = scenes.find((s) => s.index === sceneIndex)
@@ -1066,9 +1107,12 @@ export const ProductionPanel = memo(function ProductionPanel({
     setStatusMsg("📦 Iniciando exportación del capítulo completo...")
 
     try {
+      // Enviar el volumen de cada escena + el de la narración (del mezclador)
+      const volume_map: Record<string, number> = {}
+      scenes.forEach((s) => { volume_map[String(s.index)] = (s.volume ?? 10) / 100 })
       const result = await apiFetch(`/api/image-studio/chapters/${chapterId}/export-chapter`, {
         method: "POST",
-        body: JSON.stringify({ include_audio: true }),
+        body: JSON.stringify({ include_audio: true, volume_map, narration_volume: narrationVol / 100 }),
       })
       const jobId = result.export_job_id
       setStatusMsg("📦 Exportando... El worker está concatenando todos los clips + audio.")
@@ -1382,6 +1426,35 @@ export const ProductionPanel = memo(function ProductionPanel({
         </div>
       </div>
 
+      {/* ═══ MEZCLADOR — audio de videos + narración (por pista) ═══ */}
+      <div className="flex items-center gap-4 px-6 py-2 border-b border-[var(--border-default)] bg-[var(--surface-1)] flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-bold text-[var(--text-secondary)] whitespace-nowrap">🎬 Audio de videos:</span>
+          <input
+            type="range" min={0} max={100} value={masterVol}
+            onChange={(e) => {
+              const v = Number(e.target.value)
+              setMasterVol(v)
+              setScenes((prev) => prev.map((s) => ({ ...s, volume: v })))
+            }}
+            className="w-[200px] accent-blue-500"
+            title={`Volumen del audio de todos los videos: ${masterVol}%`}
+          />
+          <span className="text-[11px] font-bold text-white w-9 text-right">{masterVol}%</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-bold text-[var(--text-secondary)] whitespace-nowrap">🎙 Narración:</span>
+          <input
+            type="range" min={0} max={100} value={narrationVol}
+            onChange={(e) => setNarrationVol(Number(e.target.value))}
+            className="w-[200px] accent-emerald-500"
+            title={`Volumen de la narración (voz): ${narrationVol}%`}
+          />
+          <span className="text-[11px] font-bold text-white w-9 text-right">{narrationVol}%</span>
+        </div>
+        <span className="text-[9px] text-[var(--text-tertiary)]">Aplica al exportar por Servidor.</span>
+      </div>
+
       {/* Status */}
       {statusMsg && (
         <div className="px-6 py-2 bg-[var(--surface-2)] border-b border-[var(--border-default)]">
@@ -1408,6 +1481,7 @@ export const ProductionPanel = memo(function ProductionPanel({
                 onGenerate={() => generateScene(scene.index)}
                 onCancel={() => cancelSceneVideo(scene.index)}
                 onDelete={() => deleteSceneVideo(scene.index)}
+                onOmniTest={() => omniTestScene(scene.index)}
               />
             )
           })}
