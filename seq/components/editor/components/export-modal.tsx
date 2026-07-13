@@ -172,10 +172,16 @@ export const ExportModal = memo(function ExportModal({
         const url = vid.veo_url || vid.kb_url
         const status = vid.veo_url ? vid.veo_status : vid.kb_status
         if (status === "done" && url) {
+          // RANURA DE TIEMPO de la escena sobre el audio (del análisis con narración).
+          // El worker de export conforma cada clip a esta ranura → sincronización exacta.
+          const slot =
+            typeof vid.end_time === "number" && typeof vid.start_time === "number" && vid.end_time > vid.start_time
+              ? vid.end_time - vid.start_time
+              : (vid.duration || 8)
           clips.push({
             index: vid.segment_index,
             videoUrl: url,
-            duration: vid.duration || 8,
+            duration: slot,
             volume: vid.volume ?? 10,
             meta: vid.veo_url ? vid.veo_meta : vid.kb_meta,
           })
