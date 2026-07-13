@@ -2,7 +2,7 @@
 
 import { memo, useState, useEffect, useCallback, useRef } from "react"
 import type { ZentrixEditorData, ZentrixScene } from "./zentrix-panel"
-import { BrowserExportDialog, type ExportableScene } from "./browser-export-dialog"
+import { ExportModal } from "./export-modal"
 
 const BACKEND_URL =
   typeof window !== "undefined" && window.location.hostname === "localhost"
@@ -1499,22 +1499,26 @@ export const ProductionPanel = memo(function ProductionPanel({
         )}
       </div>
 
-      {/* Browser Export Dialog */}
-      <BrowserExportDialog
+      {/* Export Modal — Web Worker + cola (mismo componente que usa el editor).
+          Antes esto era <BrowserExportDialog>, que armaba un crossfade con TODOS
+          los clips en una sola llamada ffmpeg: con 50-70 escenas eso se cuelga
+          o se cae en el navegador. ExportModal usa el worker (export-worker.ts)
+          que solo concatena (los fundidos ya vienen horneados por clip desde
+          el servidor), y corre en cola sin bloquear la edición. */}
+      <ExportModal
         isOpen={isBrowserExportOpen}
         onClose={() => setIsBrowserExportOpen(false)}
-        scenes={scenes
-          .filter((s) => s.status === "done" && s.videoUrl)
-          .sort((a, b) => a.index - b.index)
-          .map((s) => ({
-            index: s.index,
-            videoUrl: s.videoUrl!,
-            volume: s.volume,
-            duration: s.duration,
-          }))}
-        projectName={chapterData.project_name || "Zentrix"}
+        chapterId={chapterId}
+        chapterProjectName={chapterData.project_name || "Zentrix"}
         chapterTitle={chapterData.chapter_title || ""}
         chapterNumber={chapterData.chapter_number || 1}
+        audioUrls={chapterData.audio_url ? [chapterData.audio_url] : []}
+        onStartExport={() => {}}
+        isExporting={false}
+        exportProgress={0}
+        exportPhase="idle"
+        downloadUrl={null}
+        onCancel={() => {}}
       />
     </div>
   )
