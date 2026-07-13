@@ -37,8 +37,7 @@ interface CancelMessage {
 
 type WorkerMessage = StartMessage | CancelMessage
 
-const TARGET_FPS = 24 // Debe coincidir con el servidor (ensure_export_ready normaliza a 24fps).
-                      // Si no coincide, isExportReady falla y re-codifica TODO (export lentísimo).
+const TARGET_FPS = 30
 
 let ffmpeg: FFmpeg | null = null
 let cancelled = false
@@ -218,8 +217,13 @@ async function runLegacyExport(ff: FFmpeg, clips: SceneClip[], resolution: "720p
   try { await ff.deleteFile("concat.txt") } catch {}
 }
 
-/* ── Mix narration audio ── */
-async function mixNarration(ff: FFmpeg, audioUrls: string[]) {
+/* ── Mix narration audio ──
+   videoVolume: atenuación del audio ambiental de los clips (0.0-2.0).
+   - Ruta RÁPIDA (concat -c copy): el volumen por clip NUNCA se aplicó, así que
+     se aplica AQUÍ, en la mezcla (ej. 0.10 = 10%, bien bajito bajo la narración).
+   - Ruta legacy: el volumen ya se horneó clip por clip → se pasa 1.0 para no
+     atenuar dos veces. */
+async function mixNarration(ff: FFmpeg, audioUrls: string[], videoVolume: number = 1.0) {
   if (!audioUrls || audioUrls.length === 0) return
 
   sendProgress("finalizing", 93, "Descargando narración...")
@@ -241,10 +245,14 @@ async function mixNarration(ff: FFmpeg, audioUrls: string[]) {
   try { await ff.deleteFile("output.mp4") } catch {}
 
   try {
+    // El audio de los videos IA se atenúa aquí (volume=) para que quede bien
+    // bajito debajo de la narración. duration=longest: si la narración dura un
+    // poco más que el video, NO se corta (lección aprendida del export servidor).
+    const ambFilter = `[0:a]volume=${videoVolume.toFixed(2)}[amb]`
     await ff.exec([
       "-i", "video_only.mp4",
       "-i", `narration.${ext}`,
-      "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]",
+      "-filter_complex", `${ambFilter};[amb][1:a]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[aout]`,
       "-map", "0:v", "-map", "[aout]",
       "-c:v", "copy",
       "-c:a", "aac", "-b:a", "192k",
@@ -285,9 +293,17 @@ async function runExport(clips: SceneClip[], resolution: "720p" | "1080p", audio
   const readyCount = clips.filter(c => isExportReady(c.meta, tw, th)).length
   const allReady = readyCount === clips.length
 
+  // Volumen del audio ambiental de los videos IA (slider por clip, 0-200 → 0.0-2.0).
+  // Solo se usa en la ruta rápida; en la legacy ya se hornea clip por clip.
+  const avgClipVolume = clips.length
+    ? clips.reduce((sum, c) => sum + (c.volume ?? 10), 0) / clips.length / 100
+    : 0.10
+
+  let usedFastPath = false
   if (allReady) {
     sendProgress("processing", 5, `${clips.length} clips pre-normalizados — export rápido`)
     await runFastExport(ff, clips, audioUrls)
+    usedFastPath = true
   } else {
     sendProgress("processing", 5, `${readyCount}/${clips.length} listos — normalizando ${clips.length - readyCount} clips...`)
     await runLegacyExport(ff, clips, resolution)
@@ -295,8 +311,8 @@ async function runExport(clips: SceneClip[], resolution: "720p" | "1080p", audio
 
   if (cancelled) return
 
-  // Mix narration
-  await mixNarration(ff, audioUrls)
+  // Mix narration — en ruta rápida el volumen de los clips se aplica AQUÍ
+  await mixNarration(ff, audioUrls, usedFastPath ? avgClipVolume : 1.0)
   if (cancelled) return
 
   // ── Verify + send result ──
