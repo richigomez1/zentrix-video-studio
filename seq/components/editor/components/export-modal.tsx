@@ -167,9 +167,16 @@ export const ExportModal = memo(function ExportModal({
       const data = await apiFetch(`/api/image-studio/chapters/${chapterId}/video-progress`)
       if (!data.videos || !Array.isArray(data.videos)) throw new Error("No videos found")
 
+      // Las descargas del export van por el PROXY del backend, no directo a R2:
+      // R2 bloquea/complica el CORS con URLs firmadas; nuestro backend lo garantiza.
+      const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) || "" : ""
+      const proxyUrl = (key: string) =>
+        `${BACKEND_URL}/api/media-proxy?key=${encodeURIComponent(key)}&t=${encodeURIComponent(token)}`
+
       const clips: ExportClip[] = []
       for (const vid of data.videos) {
-        const url = vid.veo_url || vid.kb_url
+        const key = vid.veo_url ? vid.veo_key : vid.kb_key
+        const url = key ? proxyUrl(key) : (vid.veo_url || vid.kb_url)
         const status = vid.veo_url ? vid.veo_status : vid.kb_status
         if (status === "done" && url) {
           // RANURA DE TIEMPO de la escena sobre el audio (del análisis con narración).
@@ -201,7 +208,7 @@ export const ExportModal = memo(function ExportModal({
         chapterId,
         chapterLabel: label,
         clips,
-        audioUrls: audioUrls || [],
+        audioUrls: data.audio_key ? [proxyUrl(data.audio_key)] : (audioUrls || []),
         resolution,
       })
 
