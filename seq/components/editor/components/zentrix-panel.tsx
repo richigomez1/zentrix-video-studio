@@ -182,10 +182,20 @@ function ChapterSelector({
         token,
       )
 
-      // Step 2: If there's audio, ask Gemini to analyze timing
+      // Step 2: tiempos. FUENTE DE VERDAD = los start/end del análisis del capítulo
+      // (el backend ya los cuadra al segundo con la duración real del audio).
+      // El re-análisis de Gemini de aquí queda SOLO como respaldo para capítulos
+      // viejos sin tiempos — tener dos análisis compitiendo causaba el desfase
+      // video-más-corto-que-el-audio en el timeline.
       let timing: TimingEntry[] | null = null
+      const lastSceneEnd = data.scenes.length
+        ? Math.max(...data.scenes.map((s) => s.end_time || 0))
+        : 0
+      const hasBackendTiming = lastSceneEnd > 1
 
-      if (data.audio_url && data.scenes.length > 0) {
+      if (hasBackendTiming) {
+        setStatus("✅ Usando los tiempos del análisis del capítulo...")
+      } else if (data.audio_url && data.scenes.length > 0) {
         setStatus("🎵 Gemini está analizando el audio...")
         try {
           const analyzeRes = await fetch("/api/seq/analyze-audio", {
