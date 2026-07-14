@@ -249,7 +249,10 @@ async function mixNarration(ff: FFmpeg, audioUrls: string[], videoVolume: number
   if (!narResponse.ok) throw new Error(`Error descargando narración: HTTP ${narResponse.status}`)
   const narData = new Uint8Array(await narResponse.arrayBuffer())
 
-  const ext = narrationUrl.split(".").pop()?.split("?")[0] || "mp3"
+  // Extensión segura: con URLs del proxy la URL termina en el token (tiene puntos),
+  // así que solo se acepta una extensión corta conocida; si no, mp3.
+  const rawExt = narrationUrl.split(".").pop()?.split("?")[0]?.split("&")[0] || "mp3"
+  const ext = /^[a-z0-9]{2,4}$/i.test(rawExt) ? rawExt.toLowerCase() : "mp3"
   await ff.writeFile(`narration.${ext}`, narData)
 
   if (cancelled) return
