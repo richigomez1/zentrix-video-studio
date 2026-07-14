@@ -1356,10 +1356,24 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                               const validScenes = data.scenes.filter((s) => s.video_url || s.image_url)
                               const audioDuration = data.audio_duration || 60
 
-                              // Build timing map from Gemini or fallback
+                              // Build timing map — PRIORIDAD:
+                              // 1) start/end del análisis del capítulo (fuente de verdad,
+                              //    cuadrados con la duración real del audio por el backend)
+                              // 2) análisis Gemini del editor (respaldo, capítulos viejos)
+                              // 3) división pareja (último recurso)
                               const timingMap = new Map<number, { start: number; duration: number }>()
+                              const lastSceneEnd = validScenes.length
+                                ? Math.max(...validScenes.map((s) => s.end_time || 0))
+                                : 0
 
-                              if (timing && timing.length > 0) {
+                              if (lastSceneEnd > 1) {
+                                for (const s of validScenes) {
+                                  timingMap.set(s.index, {
+                                    start: s.start_time || 0,
+                                    duration: Math.max(0.5, (s.end_time || 0) - (s.start_time || 0)),
+                                  })
+                                }
+                              } else if (timing && timing.length > 0) {
                                 // Use Gemini's analysis
                                 for (const t of timing) {
                                   timingMap.set(t.index, { start: t.start_time, duration: t.end_time - t.start_time })
