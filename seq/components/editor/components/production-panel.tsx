@@ -233,6 +233,7 @@ function SceneCard({
   sceneData,
   savedKBPresets,
   onSaveKBPreset,
+  onAutoPrompt,
   onDeleteKBPreset,
   onApplyKBToAll,
   onChange,
@@ -245,6 +246,7 @@ function SceneCard({
   sceneData: ZentrixScene
   savedKBPresets: { name: string; config: KBConfig }[]
   onSaveKBPreset: (name: string, config: KBConfig) => void
+  onAutoPrompt: (index: number) => void
   onDeleteKBPreset: (name: string) => void
   onApplyKBToAll: (config: KBConfig) => void
   onChange: (updates: Partial<SceneState>) => void
@@ -519,9 +521,19 @@ function SceneCard({
         ) : (
           /* ── Regular Motion Prompt ── */
           <div>
-            <label className="text-[9px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
-              Motion Prompt {hasPrompt ? "✅" : ""}
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-[9px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
+                Motion Prompt {hasPrompt ? "✅" : ""}
+              </label>
+              <button
+                onClick={() => onAutoPrompt(scene.index)}
+                disabled={scene.status === "generating"}
+                title="Reescribir SOLO el prompt de esta escena con el director (no toca las demás)"
+                className="px-1.5 py-0.5 text-[9px] font-medium text-indigo-300 bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-600/40 rounded transition-colors disabled:opacity-50"
+              >
+                🤖 Auto-prompt
+              </button>
+            </div>
             <textarea
               value={scene.motionPrompt}
               onChange={(e) => onChange({ motionPrompt: e.target.value })}
@@ -844,6 +856,44 @@ export const ProductionPanel = memo(function ProductionPanel({
       prev.map((s) => (s.index === index ? { ...s, ...updates } : s))
     )
   }, [])
+
+  /* ── Auto-prompt de UNA escena: reescribe solo ese prompt (no toca las demás) ── */
+  const handleAutoPromptScene = useCallback(async (sceneIndex: number) => {
+    if (!chapterId) return
+    setScenes((prev) => prev.map((s) => (s.index === sceneIndex && s.status !== "generating" ? { ...s, status: "pending" as const } : s)))
+    setStatusMsg(`🤖 Reescribiendo el prompt de la escena ${sceneIndex + 1}...`)
+    try {
+      const result = await apiFetch(
+        `/api/image-studio/chapters/${chapterId}/auto-prepare-videos`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            scene_indices: [sceneIndex],
+            default_resolution: globalResolution,
+          }),
+        }
+      )
+      if (!mountedRef.current) return
+      const prepared = (result.scenes || []).find((r: any) => r.index === sceneIndex && !r.skipped)
+      if (prepared) {
+        setScenes((prev) =>
+          prev.map((s) =>
+            s.index === sceneIndex
+              ? { ...s, motionPrompt: prepared.motion_prompt || s.motionPrompt, classification: prepared.scene_type || s.classification, status: "ready" as const }
+              : s
+          )
+        )
+        setStatusMsg(`✅ Prompt de la escena ${sceneIndex + 1} reescrito.`)
+      } else {
+        setScenes((prev) => prev.map((s) => (s.index === sceneIndex ? { ...s, status: s.motionPrompt ? ("ready" as const) : ("pending" as const) } : s)))
+        setStatusMsg(`⚠️ No se pudo preparar la escena ${sceneIndex + 1} (¿tiene imagen generada?)`)
+      }
+    } catch (e: unknown) {
+      if (!mountedRef.current) return
+      setScenes((prev) => prev.map((s) => (s.index === sceneIndex ? { ...s, status: s.motionPrompt ? ("ready" as const) : ("pending" as const) } : s)))
+      setStatusMsg(`❌ Error: ${e instanceof Error ? e.message : "Error desconocido"}`)
+    }
+  }, [chapterId, globalResolution])
 
   /* ── Auto-preparar: Gemini writes motion prompts ── */
   const handleAutoPrepare = useCallback(async () => {
@@ -1476,6 +1526,7 @@ export const ProductionPanel = memo(function ProductionPanel({
                 sceneData={sceneData}
                 savedKBPresets={savedKBPresets}
                 onSaveKBPreset={saveKBPreset}
+                onAutoPrompt={handleAutoPromptScene}
                 onDeleteKBPreset={deleteKBPreset}
                 onApplyKBToAll={applyKBToAll}
                 onChange={(updates) => updateScene(scene.index, updates)}
