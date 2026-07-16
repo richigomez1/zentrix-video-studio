@@ -34,6 +34,10 @@ const MODELS: ModelInfo[] = [
   { id: "veo-3.1-fast-generate-preview", name: "Veo Fast", durations: [5, 8], price720: 0.10, price1080: 0.12, emoji: "🚀", tier: "$$$" },
   { id: "veo-3.1-generate-preview", name: "Veo Full", durations: [5, 8], price720: 0.40, price1080: 0.40, emoji: "💎", tier: "$$$$" },
   { id: "omni-flash", name: "Omni Flash", durations: [4, 6, 8], price720: 0.10, price1080: 0.18, emoji: "🌟", tier: "$$$" },
+  { id: "sora-2", name: "Sora 2", durations: [4, 8, 12], price720: 0.10, price1080: 0.10, emoji: "🎦", tier: "$$$" },
+  { id: "sora-2-pro", name: "Sora 2 Pro", durations: [4, 8, 12], price720: 0.30, price1080: 0.30, emoji: "🎦", tier: "$$$$" },
+  { id: "sora-2-batch", name: "Sora 2 Batch (≤24h)", durations: [4, 8, 12], price720: 0.05, price1080: 0.05, emoji: "📦", tier: "$" },
+  { id: "sora-2-pro-batch", name: "Sora Pro Batch (≤24h)", durations: [4, 8, 12], price720: 0.15, price1080: 0.15, emoji: "📦", tier: "$$" },
 ]
 
 const MODEL_MAP = Object.fromEntries(MODELS.map((m) => [m.id, m]))
