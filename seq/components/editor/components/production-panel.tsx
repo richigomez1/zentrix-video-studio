@@ -147,7 +147,16 @@ function snapToStandardDuration(rawSeconds: number): number {
 
 /* ── Helper: get models that support a specific duration ── */
 function getCompatibleModels(duration: number): ModelInfo[] {
-  return MODELS.filter((m) => m.durations.includes(duration))
+  return MODELS.filter((m) => {
+    // Sora vende escalones fijos (4/8/12/16/20s) pero el sistema redondea HACIA
+    // ARRIBA al escalón y el director escribe la "cola de sostenimiento" (la acción
+    // termina en la ranura; el sobrante es un HOLD que el export recorta). Por eso
+    // CUALQUIER duración hasta su máximo es compatible con Sora.
+    if (m.id.startsWith("sora")) {
+      return duration <= m.durations[m.durations.length - 1]
+    }
+    return m.durations.includes(duration)
+  })
 }
 
 /* ── Ken Burns Config ── */
