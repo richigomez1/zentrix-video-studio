@@ -205,7 +205,13 @@ function getPrice(modelId: string, duration: number, resolution: Resolution): nu
   const m = MODEL_MAP[modelId]
   if (!m) return 0
   const perSec = resolution === "1080p" ? m.price1080 : m.price720
-  return perSec * duration
+  // Sora solo vende en escalones fijos (4/8/12/16/20s): se genera el escalón
+  // SIGUIENTE hacia arriba y el export recorta — el costo real es el del escalón.
+  let billed = duration
+  if (modelId.startsWith("sora")) {
+    billed = m.durations.find((d) => duration <= d) ?? m.durations[m.durations.length - 1]
+  }
+  return perSec * billed
 }
 
 /* ── API Helper ── */
@@ -874,6 +880,7 @@ export const ProductionPanel = memo(function ProductionPanel({
           body: JSON.stringify({
             scene_indices: [sceneIndex],
             default_resolution: globalResolution,
+            default_model: scenes.find((s) => s.index === sceneIndex)?.model || globalModel,
           }),
         }
       )
@@ -897,7 +904,7 @@ export const ProductionPanel = memo(function ProductionPanel({
       setScenes((prev) => prev.map((s) => (s.index === sceneIndex ? { ...s, status: s.motionPrompt ? ("ready" as const) : ("pending" as const) } : s)))
       setStatusMsg(`❌ Error: ${e instanceof Error ? e.message : "Error desconocido"}`)
     }
-  }, [chapterId, globalResolution])
+  }, [chapterId, globalResolution, scenes, globalModel])
 
   /* ── Auto-preparar: Gemini writes motion prompts ── */
   const handleAutoPrepare = useCallback(async () => {
@@ -912,6 +919,7 @@ export const ProductionPanel = memo(function ProductionPanel({
           method: "POST",
           body: JSON.stringify({
             default_duration: 10,
+            default_model: globalModel,
             default_resolution: globalResolution,
           }),
         }
