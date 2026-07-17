@@ -574,7 +574,13 @@ function SceneCard({
           className="flex-1 px-1.5 py-1 text-[10px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded text-white disabled:opacity-50"
         >
           {MODELS.map((m) => {
-            const isCompatible = m.id === "ken-burns" || m.durations.includes(scene.duration)
+            // Sora redondea al escalón + cola de sostenimiento: cualquier duración
+            // hasta su máximo es válida — sin ⚠️ (solo confundía).
+            const isCompatible =
+              m.id === "ken-burns" ||
+              (m.id.startsWith("sora")
+                ? scene.duration <= m.durations[m.durations.length - 1]
+                : m.durations.includes(scene.duration))
             return (
               <option key={m.id} value={m.id}>
                 {m.emoji} {m.name} ({m.tier}){!isCompatible ? " ⚠️" : ""}
