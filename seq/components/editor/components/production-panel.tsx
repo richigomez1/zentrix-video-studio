@@ -896,6 +896,11 @@ export const ProductionPanel = memo(function ProductionPanel({
             scene_indices: [sceneIndex],
             default_resolution: globalResolution,
             default_model: scenes.find((s) => s.index === sceneIndex)?.model || globalModel,
+            // Si la escena YA tenía prompt, el director rueda una SEGUNDA TOMA
+            // (mismo beat y continuidad, distinta forma de animarla)
+            previous_prompts: {
+              [sceneIndex]: scenes.find((s) => s.index === sceneIndex)?.motionPrompt || "",
+            },
           }),
         }
       )
