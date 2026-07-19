@@ -23,22 +23,24 @@ interface ModelInfo {
 }
 
 const MODELS: ModelInfo[] = [
+  // ── ORDEN POR PRECIO 720p, de barato a caro ──
   { id: "ken-burns", name: "Ken Burns", durations: [4, 5, 6, 8, 10, 12, 15], price720: 0, price1080: 0, emoji: "🎞", tier: "Gratis" },
   { id: "pruna-video-draft", name: "PrunaAI Draft", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.005, price1080: 0.01, emoji: "⚡", tier: "¢" },
   { id: "pruna-video", name: "PrunaAI", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.02, price1080: 0.04, emoji: "🎬", tier: "$" },
-  { id: "seedance-1-pro-fast", name: "SD 1.0 Fast", durations: [4, 6, 8, 12], price720: 0.025, price1080: 0.06, emoji: "⚡", tier: "$" },
-  { id: "seedance-1.5-pro", name: "SD 1.5 Pro", durations: [5, 8, 10, 12], price720: 0.052, price1080: 0.10, emoji: "🎥", tier: "$$" },
-  { id: "seedance-2.0-fast", name: "SD 2.0 Fast", durations: [5, 8, 10, 15], price720: 0.15, price1080: 0.30, emoji: "🔥", tier: "$$$" },
-  { id: "seedance-2.0", name: "SD 2.0", durations: [5, 8, 10, 15], price720: 0.18, price1080: 0.45, emoji: "💫", tier: "$$$$" },
+  { id: "seedance-1-pro-fast", name: "SD 1.0 Fast", durations: [4, 6, 8, 10, 12, 15], price720: 0.025, price1080: 0.06, emoji: "⚡", tier: "$" },
+  { id: "sora-2-batch", name: "Sora 2 Batch (≤24h)", durations: [4, 8, 12, 16, 20], price720: 0.05, price1080: 0.05, emoji: "📦", tier: "$" },
   { id: "veo-3.1-lite-generate-preview", name: "Veo Lite", durations: [5, 8], price720: 0.05, price1080: 0.08, emoji: "✨", tier: "$$" },
+  { id: "seedance-1.5-pro", name: "SD 1.5 Pro", durations: [5, 8, 10, 12, 15], price720: 0.052, price1080: 0.10, emoji: "🎥", tier: "$$" },
   { id: "veo-3.1-fast-generate-preview", name: "Veo Fast", durations: [5, 8], price720: 0.10, price1080: 0.12, emoji: "🚀", tier: "$$$" },
-  { id: "veo-3.1-generate-preview", name: "Veo Full", durations: [5, 8], price720: 0.40, price1080: 0.40, emoji: "💎", tier: "$$$$" },
   { id: "omni-flash", name: "Omni Flash", durations: [4, 6, 8], price720: 0.10, price1080: 0.18, emoji: "🌟", tier: "$$$" },
   { id: "sora-2", name: "Sora 2", durations: [4, 8, 12, 16, 20], price720: 0.10, price1080: 0.10, emoji: "🎦", tier: "$$$" },
-  { id: "sora-2-pro", name: "Sora 2 Pro", durations: [4, 8, 12, 16, 20], price720: 0.30, price1080: 0.30, emoji: "🎦", tier: "$$$$" },
-  { id: "sora-2-batch", name: "Sora 2 Batch (≤24h)", durations: [4, 8, 12, 16, 20], price720: 0.05, price1080: 0.05, emoji: "📦", tier: "$" },
+  { id: "seedance-2.0-fast", name: "SD 2.0 Fast", durations: [5, 8, 10, 12, 15], price720: 0.15, price1080: 0.30, emoji: "🔥", tier: "$$$" },
   { id: "sora-2-pro-batch", name: "Sora Pro Batch (≤24h)", durations: [4, 8, 12, 16, 20], price720: 0.15, price1080: 0.15, emoji: "📦", tier: "$$" },
+  { id: "seedance-2.0", name: "SD 2.0", durations: [5, 8, 10, 12, 15], price720: 0.18, price1080: 0.45, emoji: "💫", tier: "$$$$" },
+  { id: "sora-2-pro", name: "Sora 2 Pro", durations: [4, 8, 12, 16, 20], price720: 0.30, price1080: 0.30, emoji: "🎦", tier: "$$$$" },
+  { id: "veo-3.1-generate-preview", name: "Veo Full", durations: [5, 8], price720: 0.40, price1080: 0.40, emoji: "💎", tier: "$$$$" },
 ]
+
 
 const MODEL_MAP = Object.fromEntries(MODELS.map((m) => [m.id, m]))
 
