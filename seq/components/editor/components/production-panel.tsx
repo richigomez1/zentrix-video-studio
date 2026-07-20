@@ -664,6 +664,32 @@ export const ProductionPanel = memo(function ProductionPanel({
   onVideoGenerated,
 }: ProductionPanelProps) {
   const [scenes, setScenes] = useState<SceneState[]>([])
+  const [directorStatus, setDirectorStatus] = useState<any>(null)   // 🎥 Director de Video (Muse)
+  const [directorBusy, setDirectorBusy] = useState(false)
+
+  const directorStart = async () => {
+    if (!confirm("🎥 Director de Video (Muse): dirigirá y generará TODAS las escenas pendientes EN CADENA, viendo cada video terminado antes de dirigir el siguiente. Cada escena se cobra al generarse. ¿Arrancar?")) return
+    setDirectorBusy(true)
+    try {
+      const r = await apiFetch(`/api/storyboard/chapters/${chapterId}/video-director/start`, {
+        method: "POST", body: JSON.stringify({ model: globalModel || "pruna-video-draft", resolution: globalResolution }) })
+      setStatusMsg(`🎥 Director en marcha — arranca en E${r.starts_at_scene}/${r.total_scenes}`)
+    } catch (e: any) { setStatusMsg(`❌ ${e.message || "Error al arrancar el director"}`) }
+    finally { setDirectorBusy(false) }
+  }
+  const directorContinue = async (skip = false) => {
+    setDirectorBusy(true)
+    try {
+      const r = await apiFetch(`/api/storyboard/chapters/${chapterId}/video-director/continue`, {
+        method: "POST", body: JSON.stringify(skip ? { skip_scene: true, model: globalModel } : { model: globalModel }) })
+      setStatusMsg(`▶ Director continúa en E${r.resumes_at_scene}`)
+    } catch (e: any) { setStatusMsg(`❌ ${e.message}`) }
+    finally { setDirectorBusy(false) }
+  }
+  const directorStop = async () => {
+    if (!confirm("¿Detener al Director de Video? Lo hecho queda; podrás reanudarlo después con Continuar.")) return
+    try { await apiFetch(`/api/storyboard/chapters/${chapterId}/video-director/stop`, { method: "POST", body: "{}" }) ; setStatusMsg("⏹ Director detenido") } catch {}
+  }
   const [masterVol, setMasterVol] = useState<number>(10)   // volumen maestro del audio de TODOS los videos (%)
   const [narrationVol, setNarrationVol] = useState<number>(100)   // volumen de la narración (voz) (%)
   const [globalModel, setGlobalModel] = useState("ken-burns")
@@ -792,6 +818,9 @@ export const ProductionPanel = memo(function ProductionPanel({
 
     // Fetch video-progress to detect completed videos not in chapterData
     if (chapterId) {
+      apiFetch(`/api/storyboard/chapters/${chapterId}/video-director/status`).then((d) => {
+        setDirectorStatus(d && d.status ? d : null)
+      }).catch(() => {})
       apiFetch(`/api/image-studio/chapters/${chapterId}/video-progress`).then((data) => {
         if (!data.videos || !mountedRef.current) return
         setScenes((prev) => {
@@ -1446,6 +1475,24 @@ export const ProductionPanel = memo(function ProductionPanel({
             🔄 Actualizar
           </button>
 
+          {(!directorStatus || directorStatus.status !== "running") ? (
+            <button
+              onClick={directorStart}
+              disabled={directorBusy || isBatchGenerating}
+              title="Muse dirige escena por escena VIENDO cada video terminado — cadena secuencial con QA y auto-retake"
+              className="px-4 py-2 text-xs font-medium text-white bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-2"
+            >
+              🎥 Director de Video
+            </button>
+          ) : (
+            <button
+              onClick={directorStop}
+              className="px-4 py-2 text-xs font-medium text-white bg-red-700 hover:bg-red-600 rounded-lg transition-colors flex items-center gap-2"
+            >
+              ⏹ Detener Director (E{directorStatus.current_scene}/{directorStatus.total_scenes})
+            </button>
+          )}
+
           <button
             onClick={handleAutoPrepare}
             disabled={isAutoPreparing || isBatchGenerating}
@@ -1544,6 +1591,35 @@ export const ProductionPanel = memo(function ProductionPanel({
       </div>
 
       {/* Status */}
+      {directorStatus && directorStatus.status === "running" && (
+        <div className="mx-4 mt-2 px-4 py-2.5 rounded-lg bg-amber-950/60 border border-amber-700 text-amber-200 text-xs flex items-center gap-3">
+          <span className="animate-pulse">🎥</span>
+          <span className="font-semibold">Director de Video trabajando — escena {directorStatus.current_scene}/{directorStatus.total_scenes}</span>
+          <span className="text-amber-400">{directorStatus.phase === "direct" ? (directorStatus.retake_in_progress ? "🔄 dirigiendo 2ª toma" : "👁 dirigiendo (viendo material)") : directorStatus.phase === "generating" ? "⚙️ generando video" : "🔍 revisando la toma"}</span>
+          {directorStatus.use_frames && <span className="text-amber-500">· modo fotogramas</span>}
+          {directorStatus.alerts?.length > 0 && <span className="text-orange-400">· ⚠ {directorStatus.alerts.length} alertas</span>}
+        </div>
+      )}
+      {directorStatus && directorStatus.status === "paused" && (
+        <div className="mx-4 mt-2 px-4 py-3 rounded-lg bg-red-950/60 border border-red-700 text-red-200 text-xs">
+          <div className="font-bold mb-1">⏸ Director en PAUSA — escena {directorStatus.current_scene}/{directorStatus.total_scenes} falló dos tomas</div>
+          {directorStatus.alerts?.length > 0 && (
+            <div className="mb-2 text-red-300">Diagnóstico del director: {directorStatus.alerts[directorStatus.alerts.length - 1]?.diagnosis}</div>
+          )}
+          <div className="flex gap-2 mt-1">
+            <button onClick={() => directorContinue(false)} disabled={directorBusy}
+              className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-md font-medium">▶ Continuar (reintenta la escena con el modelo del selector)</button>
+            <button onClick={() => directorContinue(true)} disabled={directorBusy}
+              className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded-md font-medium">⏭ Aceptar como está y saltar</button>
+          </div>
+          <div className="mt-1.5 text-red-400/80">Cambia el modelo en el selector de arriba si quieres que reintente con otro generador, o regenera la escena a mano y usa "Aceptar y saltar".</div>
+        </div>
+      )}
+      {directorStatus && directorStatus.status === "done" && directorStatus.alerts?.length > 0 && (
+        <div className="mx-4 mt-2 px-4 py-2.5 rounded-lg bg-emerald-950/60 border border-emerald-700 text-emerald-200 text-xs">
+          🎬 Director terminó el capítulo con {directorStatus.alerts.length} escena(s) marcada(s) ⚠: {directorStatus.alerts.map((a: any) => `E${a.idx + 1}`).join(", ")} — revísalas y regenera las que no te convenzan.
+        </div>
+      )}
       {statusMsg && (
         <div className="px-6 py-2 bg-[var(--surface-2)] border-b border-[var(--border-default)]">
           <div className="text-xs text-amber-300">{statusMsg}</div>
