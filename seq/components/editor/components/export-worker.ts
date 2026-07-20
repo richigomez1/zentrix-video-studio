@@ -158,12 +158,30 @@ async function takeFileAsBlob(ff: FFmpeg, name: string): Promise<Blob> {
    La instancia de FFmpeg se recicla cada RESET_EVERY clips.
    Devuelve la lista de Blobs (uno por clip, en orden).
    ═══════════════════════════════════════════════════════════ */
+/* ── Orientación del capítulo, detectada de los propios clips ──
+   Los clips llegan PRE-RENDERIZADOS por el worker del servidor en la
+   orientación correcta (16:9 u 9:16 TikTok/Shorts). Si la mayoría de los
+   clips con metadatos son más altos que anchos → el capítulo es vertical
+   y el export respeta esa orientación (sin barras negras). */
+function detectVertical(clips: SceneClip[]): boolean {
+  let vertical = 0, horizontal = 0
+  for (const c of clips) {
+    if (c.meta && c.meta.width > 0 && c.meta.height > 0) {
+      if (c.meta.height > c.meta.width) vertical++
+      else horizontal++
+    }
+  }
+  return vertical > horizontal
+}
+
 async function processClips(
   clips: SceneClip[],
   resolution: "720p" | "1080p",
 ): Promise<(Blob | null)[]> {
-  const tw = resolution === "1080p" ? 1920 : 1280
-  const th = resolution === "1080p" ? 1080 : 720
+  const isVertical = detectVertical(clips)
+  const tw = resolution === "1080p" ? (isVertical ? 1080 : 1920) : (isVertical ? 720 : 1280)
+  const th = resolution === "1080p" ? (isVertical ? 1920 : 1080) : (isVertical ? 1280 : 720)
+  if (isVertical) sendProgress("processing", 0, "Capítulo vertical (9:16) detectado")
   let copied = 0
   let conformed = 0
   const out: (Blob | null)[] = new Array(clips.length).fill(null)
