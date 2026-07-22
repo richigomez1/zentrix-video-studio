@@ -282,6 +282,11 @@ function SceneCard({
   const cost = getPrice(scene.model, scene.duration, scene.resolution)
   const hasPrompt = scene.motionPrompt.trim().length > 0
   const isVeo = scene.model.startsWith("veo-")
+  // Detección automática de contenido VERTICAL (9:16): al cargar la imagen/video se miden
+  // sus dimensiones reales; si es más alto que ancho, la miniatura usa object-contain
+  // (se ve COMPLETA, con franjas laterales) en vez de object-cover (que cortaba cabezas).
+  const [imgVertical, setImgVertical] = useState(false)
+  const [vidVertical, setVidVertical] = useState(false)
 
   return (
     <div className={`rounded-xl border transition-all ${
@@ -296,7 +301,7 @@ function SceneCard({
         {/* Image thumbnail */}
         <div className="w-28 h-20 rounded-lg overflow-hidden bg-[var(--surface-2)] flex-shrink-0 relative">
           {sceneData.image_url ? (
-            <img src={sceneData.image_url} alt={`Escena ${scene.index + 1}`} className="w-full h-full object-cover" />
+            <img src={sceneData.image_url} alt={`Escena ${scene.index + 1}`} onLoad={(e) => { const t = e.target as HTMLImageElement; setImgVertical(t.naturalHeight > t.naturalWidth) }} className={`w-full h-full ${imgVertical ? "object-contain" : "object-cover"}`} />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-[var(--text-tertiary)] text-xs">
               Sin imagen
@@ -320,10 +325,11 @@ function SceneCard({
             <div className="relative w-full h-full group">
               <video
                 src={scene.videoUrl}
-                className="w-full h-full object-cover"
+                className={`w-full h-full ${vidVertical ? "object-contain" : "object-cover"}`}
                 muted
                 loop
                 playsInline
+                onLoadedMetadata={(e) => { const v = e.target as HTMLVideoElement; setVidVertical(v.videoHeight > v.videoWidth) }}
                 onMouseEnter={(e) => (e.target as HTMLVideoElement).play()}
                 onMouseLeave={(e) => { const v = e.target as HTMLVideoElement; v.pause(); v.currentTime = 0 }}
               />
