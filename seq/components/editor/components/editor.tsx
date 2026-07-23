@@ -1443,9 +1443,13 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
                               }
 
                               timeline.setMedia(mediaItems)
-                              // Set tracks: video ambient at 30%, narration at 100%
+                              // Pistas según el modo del capítulo:
+                              //  · Narrado: video (ambiente) al 30%, narración al 100%.
+                              //  · 🗣 Modo Diálogo: las VOCES van EN los clips → pista de video al 100%
+                              //    (antes quedaba al 30% y el diálogo casi no se oía en la vista previa).
+                              const isDialogue = !!(data as any).dialogue_mode
                               timeline.setTracks([
-                                { id: "v1", type: "video", name: "VIDEO 1", isMuted: false, volume: 0.3, isLocked: false },
+                                { id: "v1", type: "video", name: "VIDEO 1", isMuted: false, volume: isDialogue ? 1.0 : 0.3, isLocked: false },
                                 { id: "a1", type: "audio", name: "AUDIO 1", isMuted: false, volume: 1.0, isLocked: false },
                               ])
                               setTimeout(() => {
