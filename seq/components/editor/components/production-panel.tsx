@@ -1481,23 +1481,8 @@ export const ProductionPanel = memo(function ProductionPanel({
             🔄 Actualizar
           </button>
 
-          {(!directorStatus || directorStatus.status !== "running") ? (
-            <button
-              onClick={directorStart}
-              disabled={directorBusy || isBatchGenerating}
-              title="Muse dirige escena por escena VIENDO cada video terminado — cadena secuencial con QA y auto-retake"
-              className="px-4 py-2 text-xs font-medium text-white bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-2"
-            >
-              🎥 Director de Video
-            </button>
-          ) : (
-            <button
-              onClick={directorStop}
-              className="px-4 py-2 text-xs font-medium text-white bg-red-700 hover:bg-red-600 rounded-lg transition-colors flex items-center gap-2"
-            >
-              ⏹ Detener Director (E{directorStatus.current_scene}/{directorStatus.total_scenes})
-            </button>
-          )}
+          {/* 🎥 Director de Video RETIRADO del panel (23-jul, decisión de Richi): el backend
+              está desactivado. El código de estado/lógica queda abajo por si se retoma. */}
 
           <button
             onClick={handleAutoPrepare}
