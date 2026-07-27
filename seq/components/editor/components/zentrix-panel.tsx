@@ -10,6 +10,8 @@ const BACKEND_URL =
 
 const TOKEN_KEY = "zentrix_token"
 
+type ApiError = Error & { status?: number }
+
 async function apiFetch(path: string, token: string, opts: RequestInit = {}) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -17,9 +19,23 @@ async function apiFetch(path: string, token: string, opts: RequestInit = {}) {
   }
   if (token) headers["Authorization"] = `Bearer ${token}`
   const res = await fetch(BACKEND_URL + path, { ...opts, headers })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.detail || "Error del servidor")
+  let data: any = null
+  try { data = await res.json() } catch { data = null }
+  if (!res.ok) {
+    const err = new Error((data && data.detail) || "Error del servidor") as ApiError
+    err.status = res.status
+    throw err
+  }
   return data
+}
+
+/* ¿El fallo es de sesión (token caducado/ausente)? El backend responde 401 y el texto
+   "Token inválido o expirado". Si es eso, hay que devolver al usuario al login en vez
+   de dejarlo atascado mirando el error rojo con el desplegable vacío. */
+function isAuthError(e: unknown): boolean {
+  if (e && typeof e === "object" && "status" in e && (e as ApiError).status === 401) return true
+  const msg = e instanceof Error ? e.message.toLowerCase() : ""
+  return msg.includes("token") || msg.includes("autoriz") || msg.includes("sesión") || msg.includes("sesion")
 }
 
 interface ZentrixProject {
@@ -136,10 +152,12 @@ function ChapterSelector({
   token,
   onLoad,
   onLogout,
+  onAuthExpired,
 }: {
   token: string
   onLoad: (result: ZentrixChapterWithTiming) => void
   onLogout: () => void
+  onAuthExpired: () => void
 }) {
   const [source, setSource] = useState<ZentrixSource>("image-studio")
   const [projects, setProjects] = useState<ZentrixProject[]>([])
@@ -156,8 +174,8 @@ function ChapterSelector({
     setProjects([]); setChapters([]); setSelProject(""); setSelChapter(""); setError("")
     apiFetch(`/api/${source}/projects`, token)
       .then((d) => setProjects(Array.isArray(d) ? d : d.projects || []))
-      .catch((e) => setError(e.message))
-  }, [token, source])
+      .catch((e) => { if (isAuthError(e)) onAuthExpired(); else setError(e.message) })
+  }, [token, source, onAuthExpired])
 
   useEffect(() => {
     if (!selProject) { setChapters([]); setSelChapter(""); return }
@@ -165,9 +183,9 @@ function ChapterSelector({
     setSelChapter("")
     apiFetch(`/api/${source}/projects/${selProject}`, token)
       .then((d) => setChapters(d.chapters || []))
-      .catch((e) => setError(e.message))
+      .catch((e) => { if (isAuthError(e)) onAuthExpired(); else setError(e.message) })
       .finally(() => setLoadingChapters(false))
-  }, [selProject, token, source])
+  }, [selProject, token, source, onAuthExpired])
 
   const handleLoad = async () => {
     if (!selChapter) return
@@ -229,7 +247,8 @@ function ChapterSelector({
 
       onLoad({ data, timing, chapterId: selChapter, source })
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Error al cargar")
+      if (isAuthError(e)) onAuthExpired()
+      else setError(e instanceof Error ? e.message : "Error al cargar")
     } finally {
       setLoading(false)
       setStatus("")
@@ -471,6 +490,16 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter,
     setLoadedData(null)
   }, [])
 
+  /* Sesión caducada en cualquier petición → borra el token malo y vuelve al login
+     con un aviso claro (en vez de dejar el desplegable vacío con el error rojo). */
+  const handleAuthExpired = useCallback(() => {
+    localStorage.removeItem(TOKEN_KEY)
+    setToken(null)
+    setLoadedData(null)
+    setLoadedChapterId(null)
+    setLoginError("Tu sesión expiró. Vuelve a iniciar sesión.")
+  }, [])
+
   const handleLoad = useCallback(
     (result: ZentrixChapterWithTiming) => {
       setLoadedData(result.data)
@@ -493,11 +522,12 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter,
       setLoadedData(data)
       onLoadChapter({ data, timing: null, chapterId: loadedChapterId, source: loadedSource })
     } catch (e: unknown) {
-      console.error("Refresh failed:", e)
+      if (isAuthError(e)) handleAuthExpired()
+      else console.error("Refresh failed:", e)
     } finally {
       setIsRefreshing(false)
     }
-  }, [loadedChapterId, token, loadedSource, onLoadChapter])
+  }, [loadedChapterId, token, loadedSource, onLoadChapter, handleAuthExpired])
 
   const handleDeleteAllVideos = useCallback(async () => {
     if (!loadedChapterId || !token) return
@@ -512,9 +542,10 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter,
       setLoadedData(data)
       onLoadChapter({ data, timing: null, chapterId: loadedChapterId, source: loadedSource })
     } catch (e: unknown) {
-      console.error("Delete videos failed:", e)
+      if (isAuthError(e)) handleAuthExpired()
+      else console.error("Delete videos failed:", e)
     }
-  }, [loadedChapterId, token, loadedSource, onLoadChapter])
+  }, [loadedChapterId, token, loadedSource, onLoadChapter, handleAuthExpired])
 
   return (
     <div className="flex h-full w-[320px] flex-col border-r border-[var(--border-default)] bg-[var(--surface-0)]">
@@ -534,7 +565,7 @@ export const ZentrixPanel = memo(function ZentrixPanel({ onClose, onLoadChapter,
         ) : loadedData ? (
           <LoadedInfo data={loadedData} source={loadedSource} hasTiming={hasTiming} onLoadAnother={() => { setLoadedData(null); setLoadedChapterId(null); }} onClear={() => { setLoadedData(null); setLoadedChapterId(null); onClearProject(); }} onOpenProduction={onOpenProduction} onRefreshVideos={handleRefreshVideos} onDeleteAllVideos={handleDeleteAllVideos} isRefreshing={isRefreshing} />
         ) : (
-          <ChapterSelector token={token} onLoad={handleLoad} onLogout={handleLogout} />
+          <ChapterSelector token={token} onLoad={handleLoad} onLogout={handleLogout} onAuthExpired={handleAuthExpired} />
         )}
       </div>
 
