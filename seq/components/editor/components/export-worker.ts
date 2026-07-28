@@ -64,6 +64,10 @@ type WorkerMessage = StartMessage | CancelMessage
 
 // IMPORTANTE: 24, igual que el pre-render del servidor (ensure_export_ready).
 const TARGET_FPS = 24
+// Respiro de edición (petición de Richi): 3s de aire antes de que arranque la narración y
+// 3s al final para que el video no termine en seco.
+const HEAD_SECONDS = 3
+const TAIL_SECONDS = 3
 // Tolerancia de duración: diferencias menores a esto no ameritan re-codificar.
 const SLOT_TOLERANCE = 0.25 // segundos
 // Reciclaje de memoria: reiniciar la instancia de FFmpeg cada N clips procesados.
@@ -334,8 +338,73 @@ async function concatBlobs(
   return concatBlobs(partBlobs, `${label} (final)`, progressBase + 6)
 }
 
+/* ── FASE 2.5: RESPIRO de 3s al inicio y 3s al final ──
+   Se fabrican dos clips cortos (primer y último fotograma congelados) con EXACTAMENTE los
+   mismos parámetros que los clips normalizados y se pegan con `-c copy`: así solo se
+   codifican 6 segundos en vez de re-codificar todo el video (que en el navegador sería
+   lentísimo). Si cualquier paso falla, se devuelve el video tal cual — el export NUNCA
+   se rompe por el respiro. */
+async function addBreathingRoom(videoBlob: Blob): Promise<Blob> {
+  try {
+    const ff = await resetFFmpeg()
+    await ff.writeFile("main.mp4", new Uint8Array(await videoBlob.arrayBuffer()))
+
+    // Primer y último fotograma como PNG: heredan la resolución real del video,
+    // así no hace falta calcular tw/th ni arriesgar un desajuste al concatenar.
+    await ff.exec(["-i", "main.mp4", "-frames:v", "1", "-y", "first.png"])
+    try {
+      await ff.exec(["-sseof", "-0.5", "-i", "main.mp4", "-frames:v", "1", "-y", "last.png"])
+    } catch {
+      await ff.exec(["-i", "main.mp4", "-frames:v", "1", "-y", "last.png"])
+    }
+
+    // Mismos códecs/parámetros que normalizeClip → el concat por copia es compatible.
+    const encArgs = [
+      "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p",
+      "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+      "-r", String(TARGET_FPS),
+    ]
+
+    // Cabecera: primer fotograma congelado + silencio + entrada desde negro (1s)
+    await ff.exec([
+      "-loop", "1", "-i", "first.png",
+      "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+      "-t", String(HEAD_SECONDS),
+      "-vf", "setsar=1,fade=t=in:st=0:d=1",
+      "-map", "0:v", "-map", "1:a",
+      ...encArgs, "-y", "head.mp4",
+    ])
+
+    // Cola: último fotograma congelado + silencio + fundido a negro (1.5s)
+    await ff.exec([
+      "-loop", "1", "-i", "last.png",
+      "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+      "-t", String(TAIL_SECONDS),
+      "-vf", `setsar=1,fade=t=out:st=${(TAIL_SECONDS - 1.5).toFixed(2)}:d=1.5`,
+      "-map", "0:v", "-map", "1:a",
+      ...encArgs, "-y", "tail.mp4",
+    ])
+
+    const list = "file 'head.mp4'\nfile 'main.mp4'\nfile 'tail.mp4'\n"
+    await ff.writeFile("bconcat.txt", new TextEncoder().encode(list))
+    await ff.exec([
+      "-f", "concat", "-safe", "0", "-i", "bconcat.txt",
+      "-c", "copy", "-movflags", "+faststart", "-y", "padded.mp4",
+    ])
+
+    const out = await takeFileAsBlob(ff, "padded.mp4")
+    // Comprobación: el resultado debe ser MÁS grande (le añadimos 6s). Si salió más
+    // pequeño, el concat falló y se devuelve el original sin respiro.
+    if (out.size > videoBlob.size * 0.9) return out
+    return videoBlob
+  } catch {
+    return videoBlob
+  }
+}
+
 /* ── FASE 3: mezclar la narración (instancia fresca) ── */
-async function mixNarration(videoBlob: Blob, audioUrls: string[], videoVolume: number): Promise<Blob> {
+async function mixNarration(videoBlob: Blob, audioUrls: string[], videoVolume: number,
+                            headDelaySec = 0): Promise<Blob> {
   if (!audioUrls || audioUrls.length === 0) return videoBlob
 
   sendProgress("finalizing", 93, "Descargando narración...")
@@ -357,12 +426,19 @@ async function mixNarration(videoBlob: Blob, audioUrls: string[], videoVolume: n
   if (cancelled) throw new Error("Cancelado")
   sendProgress("finalizing", 95, "Mezclando narración...")
 
+  // La narración se retrasa `headDelaySec` para que encaje con la cabecera congelada.
+  // NUNCA se le aplica fundido: ni la primera ni la última palabra se atenúan.
+  const delayMs = Math.round(Math.max(0, headDelaySec) * 1000)
+  const narChain = delayMs > 0 ? `[1:a]adelay=all=1:delays=${delayMs}[narr]` : "[1:a]anull[narr]"
+
   try {
     const ambFilter = `[0:a]volume=${videoVolume.toFixed(2)}[amb]`
     await ff.exec([
       "-i", "video_only.mp4",
       "-i", `narration.${ext}`,
-      "-filter_complex", `${ambFilter};[amb][1:a]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[aout]`,
+      // duration=longest + SIN -shortest: si la narración es más larga que el video,
+      // el audio se conserva COMPLETO (antes se perdía el final).
+      "-filter_complex", `${ambFilter};${narChain};[amb][narr]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[aout]`,
       "-map", "0:v", "-map", "[aout]",
       "-c:v", "copy",
       "-c:a", "aac", "-b:a", "192k",
@@ -370,14 +446,15 @@ async function mixNarration(videoBlob: Blob, audioUrls: string[], videoVolume: n
       "-y", "output.mp4",
     ])
   } catch {
-    // Respaldo: narración como único audio
+    // Respaldo: narración como único audio (también retrasada y SIN -shortest,
+    // que era justo lo que recortaba el final del audio).
     await ff.exec([
       "-i", "video_only.mp4",
       "-i", `narration.${ext}`,
-      "-map", "0:v", "-map", "1:a",
+      "-filter_complex", `${narChain}`,
+      "-map", "0:v", "-map", "[narr]",
       "-c:v", "copy",
       "-c:a", "aac", "-b:a", "192k",
-      "-shortest",
       "-movflags", "+faststart",
       "-y", "output.mp4",
     ])
@@ -413,8 +490,15 @@ async function runExport(clips: SceneClip[], resolution: "720p" | "1080p", audio
   clipBlobs.fill(null)
   if (cancelled) return
 
-  // FASE 3: narración
-  const finalBlob = await mixNarration(joined, audioUrls, avgClipVolume)
+  // FASE 2.5: respiro de 3s al inicio y 3s al final (solo codifica 6s)
+  sendProgress("finalizing", 90, "Añadiendo respiro (3s al inicio y al final)...")
+  const padded = await addBreathingRoom(joined)
+  const gotRoom = padded !== joined
+  if (cancelled) return
+
+  // FASE 3: narración — retrasada lo que dure la cabecera para que cuadre con el video
+  const finalBlob = await mixNarration(padded, audioUrls, avgClipVolume,
+                                       gotRoom ? HEAD_SECONDS : 0)
   if (cancelled) return
 
   // ── Verificar y enviar ──
