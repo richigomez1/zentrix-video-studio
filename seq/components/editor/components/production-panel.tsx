@@ -988,6 +988,11 @@ export const ProductionPanel = memo(function ProductionPanel({
             default_duration: 10,
             default_model: globalModel,
             default_resolution: globalResolution,
+            // Modelo POR ESCENA: el director escribe cada ficha con el perfil del generador
+            // que el usuario eligió en ESA tarjeta (Seedance = timeline con acciones densas;
+            // Ken Burns = paneo simple). Antes mandaba solo el global (que arranca en
+            // ken-burns) y todas las fichas salían de foto fija.
+            scene_models: Object.fromEntries(scenes.map((s) => [s.index, s.model])),
           }),
         }
       )
