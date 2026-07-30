@@ -30,16 +30,16 @@ const MODELS: ModelInfo[] = [
   { id: "seedance-1-pro-fast", name: "SD 1.0 Fast", durations: [4, 6, 8, 10, 12, 15], price720: 0.025, price1080: 0.06, emoji: "⚡", tier: "$" },
   { id: "sora-2-batch", name: "Sora 2 Batch (≤24h)", durations: [4, 8, 12, 16, 20], price720: 0.05, price1080: 0.05, emoji: "📦", tier: "$" },
   { id: "veo-3.1-lite-generate-preview", name: "Veo Lite", durations: [5, 8], price720: 0.05, price1080: 0.08, emoji: "✨", tier: "$$" },
-  { id: "seedance-1.5-pro", name: "SD 1.5 Pro", durations: [5, 8, 10, 12, 15], price720: 0.052, price1080: 0.052, emoji: "🎥", tier: "$$" },
+  { id: "seedance-1.5-pro", name: "SD 1.5 Pro", durations: [5, 8, 10, 12, 15], price720: 0.052, price1080: 0.117, emoji: "🎥", tier: "$$" },
   { id: "hailuo-2.3", name: "Hailuo 2.3", durations: [4, 6, 8, 10], price720: 0.082, price1080: 0.082, emoji: "🐆", tier: "$$$" },
   { id: "happyhorse-1.1", name: "HappyHorse 1.1", durations: [4, 5, 8, 10, 12, 15], price720: 0.099, price1080: 0.099, emoji: "🐴", tier: "$$$" },
   { id: "wan-2.6", name: "Wan 2.6", durations: [5, 10, 15], price720: 0.10, price1080: 0.10, emoji: "🌀", tier: "$$$" },
   { id: "veo-3.1-fast-generate-preview", name: "Veo Fast", durations: [5, 8], price720: 0.10, price1080: 0.12, emoji: "🚀", tier: "$$$" },
   { id: "omni-flash", name: "Omni Flash", durations: [4, 6, 8], price720: 0.10, price1080: 0.18, emoji: "🌟", tier: "$$$" },
   { id: "sora-2", name: "Sora 2", durations: [4, 8, 12, 16, 20], price720: 0.10, price1080: 0.10, emoji: "🎦", tier: "$$$" },
-  { id: "seedance-2.0-fast", name: "SD 2.0 Fast", durations: [5, 8, 10, 12, 15], price720: 0.121, price1080: 0.121, emoji: "🔥", tier: "$$$" },
+  { id: "seedance-2.0-fast", name: "SD 2.0 Fast", durations: [5, 8, 10, 12, 15], price720: 0.121, price1080: 0.272, emoji: "🔥", tier: "$$$" },
   { id: "sora-2-pro-batch", name: "Sora Pro Batch (≤24h)", durations: [4, 8, 12, 16, 20], price720: 0.15, price1080: 0.15, emoji: "📦", tier: "$$" },
-  { id: "seedance-2.0", name: "SD 2.0", durations: [5, 8, 10, 12, 15], price720: 0.151, price1080: 0.151, emoji: "💫", tier: "$$$$" },
+  { id: "seedance-2.0", name: "SD 2.0", durations: [5, 8, 10, 12, 15], price720: 0.151, price1080: 0.340, emoji: "💫", tier: "$$$$" },
   { id: "sora-2-pro", name: "Sora 2 Pro", durations: [4, 8, 12, 16, 20], price720: 0.30, price1080: 0.30, emoji: "🎦", tier: "$$$$" },
   { id: "veo-3.1-generate-preview", name: "Veo Full", durations: [5, 8], price720: 0.40, price1080: 0.40, emoji: "💎", tier: "$$$$" },
 ]
@@ -226,10 +226,12 @@ function getPrice(modelId: string, duration: number, resolution: Resolution): nu
   const m = MODEL_MAP[modelId]
   if (!m) return 0
   const perSec = resolution === "1080p" ? m.price1080 : m.price720
-  // Sora solo vende en escalones fijos (4/8/12/16/20s): se genera el escalón
-  // SIGUIENTE hacia arriba y el export recorta — el costo real es el del escalón.
+  // Modelos con escalones fijos (Sora 4/8/12/16/20; Seedance OpenRouter 5/8/10/12/15):
+  // se genera el escalón SIGUIENTE hacia arriba y el export recorta — el costo real es
+  // el del ESCALÓN, no el de la ranura. Antes el estimado usaba la ranura y el cobro
+  // real salía más alto (una escena de 6s se factura como 8s).
   let billed = duration
-  if (modelId.startsWith("sora")) {
+  if (modelId.startsWith("sora") || modelId === "seedance-1.5-pro" || modelId === "seedance-2.0-fast" || modelId === "seedance-2.0") {
     billed = m.durations.find((d) => duration <= d) ?? m.durations[m.durations.length - 1]
   }
   return perSec * billed
