@@ -160,6 +160,13 @@ function getCompatibleModels(duration: number): ModelInfo[] {
     if (m.id.startsWith("sora")) {
       return duration <= m.durations[m.durations.length - 1]
     }
+    // Seedance vía OpenRouter recibe el MISMO trato que Sora: el worker redondea la
+    // duración HACIA ARRIBA a su escalón (5/8/10/12/15) y el export recorta a la
+    // ranura exacta. Una escena de 6s se genera de 8s y se recorta — nunca queda
+    // bloqueada. (SD 1.0 va por Replicate, SIN snap en el worker: mantiene lista exacta.)
+    if (m.id === "seedance-1.5-pro" || m.id === "seedance-2.0-fast" || m.id === "seedance-2.0") {
+      return duration <= m.durations[m.durations.length - 1]
+    }
     return m.durations.includes(duration)
   })
 }
