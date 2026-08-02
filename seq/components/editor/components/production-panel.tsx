@@ -976,6 +976,41 @@ export const ProductionPanel = memo(function ProductionPanel({
   }, [chapterId, globalResolution, scenes, globalModel])
 
   /* ── Auto-preparar: Gemini writes motion prompts ── */
+  /* ── 🎬 Indicaciones al director: briefing del PRODUCTOR por capítulo. Se guarda con
+     el capítulo y lo usan Auto-preparar y el Auto-prompt por escena hasta que se cambie. ── */
+  const [showBriefing, setShowBriefing] = useState(false)
+  const [briefing, setBriefing] = useState("")
+  const [briefingLoaded, setBriefingLoaded] = useState(false)
+  const [savingBriefing, setSavingBriefing] = useState(false)
+
+  const openBriefing = useCallback(async () => {
+    setShowBriefing((v) => !v)
+    if (!briefingLoaded && chapterId) {
+      try {
+        const r = await apiFetch(`/api/image-studio/chapters/${chapterId}/director-briefing`, { method: "GET" })
+        setBriefing(r.briefing || "")
+        setBriefingLoaded(true)
+      } catch { /* sin briefing previo */ }
+    }
+  }, [briefingLoaded, chapterId])
+
+  const saveBriefing = useCallback(async () => {
+    if (!chapterId) return
+    setSavingBriefing(true)
+    try {
+      await apiFetch(`/api/image-studio/chapters/${chapterId}/director-briefing`, {
+        method: "POST",
+        body: JSON.stringify({ briefing }),
+      })
+      setStatusMsg(briefing.trim() ? "🎬 Indicaciones guardadas — el director las usará en los próximos prompts" : "🎬 Indicaciones borradas")
+      setShowBriefing(false)
+    } catch (e) {
+      setStatusMsg(`Error guardando indicaciones: ${e instanceof Error ? e.message : e}`)
+    } finally {
+      setSavingBriefing(false)
+    }
+  }, [chapterId, briefing])
+
   const handleAutoPrepare = useCallback(async () => {
     if (!chapterId) return
     setIsAutoPreparing(true)
@@ -1499,6 +1534,14 @@ export const ProductionPanel = memo(function ProductionPanel({
               está desactivado. El código de estado/lógica queda abajo por si se retoma. */}
 
           <button
+            onClick={openBriefing}
+            className={`px-4 py-2 text-xs font-medium rounded-lg transition-colors flex items-center gap-2 ${briefing.trim() ? "text-amber-200 bg-amber-700/60 hover:bg-amber-600/60" : "text-white bg-neutral-700 hover:bg-neutral-600"}`}
+            title="Escríbele al director qué quieres para ESTE capítulo (género, energía, crudeza, dónde hay acción...). Él decide dónde aplicarlo escena por escena."
+          >
+            🎬 Director{briefing.trim() ? " ●" : ""}
+          </button>
+
+          <button
             onClick={handleAutoPrepare}
             disabled={isAutoPreparing || isBatchGenerating}
             className="px-4 py-2 text-xs font-medium text-white bg-purple-600 hover:bg-purple-500 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-2"
@@ -1565,6 +1608,40 @@ export const ProductionPanel = memo(function ProductionPanel({
           )}
         </div>
       </div>
+
+      {/* ═══ 🎬 INDICACIONES AL DIRECTOR — briefing del productor por capítulo ═══ */}
+      {showBriefing && (
+        <div className="px-6 py-3 border-b border-amber-800/50 bg-amber-950/30">
+          <div className="text-[11px] font-bold text-amber-300 mb-1.5">
+            🎬 Escríbele al director qué quieres para ESTE capítulo — él decide dónde aplicarlo escena por escena
+          </div>
+          <textarea
+            value={briefing}
+            onChange={(e) => setBriefing(e.target.value)}
+            rows={3}
+            placeholder='Ej: "Esta es una historia de terror. En este capítulo hay acción, más movimiento de personajes, crudeza — probablemente una pelea. Quiero que lo transmitas."'
+            className="w-full text-xs bg-[var(--surface-0)] border border-amber-800/60 rounded-lg px-3 py-2 text-neutral-200 focus:outline-none focus:border-amber-500 resize-y"
+          />
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              onClick={saveBriefing}
+              disabled={savingBriefing}
+              className="px-4 py-1.5 text-xs font-medium text-white bg-amber-600 hover:bg-amber-500 rounded-lg transition-colors disabled:opacity-40"
+            >
+              {savingBriefing ? "Guardando..." : "Guardar indicaciones"}
+            </button>
+            <button
+              onClick={() => setShowBriefing(false)}
+              className="px-3 py-1.5 text-xs text-neutral-400 hover:text-white transition-colors"
+            >
+              Cancelar
+            </button>
+            <span className="text-[10px] text-neutral-500">
+              Se guarda con el capítulo — lo usan Auto-preparar y el Auto-prompt por escena hasta que lo cambies o lo borres.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* ═══ MEZCLADOR — audio de videos + narración (por pista) ═══ */}
       <div className="flex items-center gap-4 px-6 py-2 border-b border-[var(--border-default)] bg-[var(--surface-1)] flex-wrap">
