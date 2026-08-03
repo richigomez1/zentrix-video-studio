@@ -31,6 +31,11 @@ const MODELS: ModelInfo[] = [
   { id: "sora-2-batch", name: "Sora 2 Batch (≤24h)", durations: [4, 8, 12, 16, 20], price720: 0.05, price1080: 0.05, emoji: "📦", tier: "$" },
   { id: "veo-3.1-lite-generate-preview", name: "Veo Lite", durations: [5, 8], price720: 0.05, price1080: 0.08, emoji: "✨", tier: "$$" },
   { id: "seedance-1.5-pro", name: "SD 1.5 Pro", durations: [5, 8, 10, 12, 15], price720: 0.052, price1080: 0.117, emoji: "🎥", tier: "$$" },
+  // MiniMax H3 — API DIRECTA de MiniMax (no OpenRouter). Solo 2 resoluciones REALES:
+  // "720p" del selector = 768P ($0.08/s) y "1080p" = 2K 2560×1440 ($0.13/s).
+  // Duración: CUALQUIER entero 4-15, SIN escalones (6s se genera y factura de 6s).
+  // Audio nativo sí ([SFX]). El costo real facturado sale en el log [MMAX 💰] de Render.
+  { id: "minimax-h3", name: "MiniMax H3 (2K)", durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price720: 0.08, price1080: 0.13, emoji: "🐉", tier: "$$" },
   { id: "hailuo-2.3", name: "Hailuo 2.3", durations: [4, 6, 8, 10], price720: 0.082, price1080: 0.082, emoji: "🐆", tier: "$$$" },
   { id: "happyhorse-1.1", name: "HappyHorse 1.1", durations: [4, 5, 8, 10, 12, 15], price720: 0.099, price1080: 0.099, emoji: "🐴", tier: "$$$" },
   { id: "wan-2.6", name: "Wan 2.6", durations: [5, 10, 15], price720: 0.10, price1080: 0.10, emoji: "🌀", tier: "$$$" },
@@ -167,6 +172,12 @@ function getCompatibleModels(duration: number): ModelInfo[] {
     if (m.id === "seedance-1.5-pro" || m.id === "seedance-2.0-fast" || m.id === "seedance-2.0") {
       return duration <= m.durations[m.durations.length - 1]
     }
+    // MiniMax H3: cualquier entero 4-15 SIN escalones. El worker redondea al entero
+    // HACIA ARRIBA (clamp 4-15) y el export recorta a la ranura exacta — una escena
+    // de 3s se genera de 4s y se recorta. Compatible con cualquier duración ≤ 15.
+    if (m.id === "minimax-h3") {
+      return duration <= m.durations[m.durations.length - 1]
+    }
     return m.durations.includes(duration)
   })
 }
@@ -233,6 +244,11 @@ function getPrice(modelId: string, duration: number, resolution: Resolution): nu
   let billed = duration
   if (modelId.startsWith("sora") || modelId === "seedance-1.5-pro" || modelId === "seedance-2.0-fast" || modelId === "seedance-2.0") {
     billed = m.durations.find((d) => duration <= d) ?? m.durations[m.durations.length - 1]
+  }
+  // MiniMax H3 factura el SEGUNDO ENTERO exacto (sin escalones): redondeo hacia
+  // arriba con límites 4-15 — igual que clamp_seconds() del worker.
+  if (modelId === "minimax-h3") {
+    billed = Math.max(4, Math.min(15, Math.ceil(duration - 0.01)))
   }
   return perSec * billed
 }
