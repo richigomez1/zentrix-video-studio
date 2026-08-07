@@ -27,26 +27,24 @@ const MODELS: ModelInfo[] = [
   { id: "ken-burns", name: "Ken Burns", durations: [4, 5, 6, 8, 10, 12, 15], price720: 0, price1080: 0, emoji: "🎞", tier: "Gratis" },
   { id: "pruna-video-draft", name: "PrunaAI Draft", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.005, price1080: 0.01, emoji: "⚡", tier: "¢" },
   { id: "pruna-video", name: "PrunaAI", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.02, price1080: 0.04, emoji: "🎬", tier: "$" },
-  { id: "seedance-1-pro-fast", name: "SD 1.0 Fast", durations: [4, 6, 8, 10, 12, 15], price720: 0.025, price1080: 0.06, emoji: "⚡", tier: "$" },
   { id: "sora-2-batch", name: "Sora 2 Batch (≤24h)", durations: [4, 8, 12, 16, 20], price720: 0.05, price1080: 0.05, emoji: "📦", tier: "$" },
   { id: "veo-3.1-lite-generate-preview", name: "Veo Lite", durations: [5, 8], price720: 0.05, price1080: 0.08, emoji: "✨", tier: "$$" },
-  { id: "seedance-1.5-pro", name: "SD 1.5 Pro", durations: [5, 8, 10, 12, 15], price720: 0.052, price1080: 0.117, emoji: "🎥", tier: "$$" },
   // MiniMax H3 — API DIRECTA de MiniMax (no OpenRouter). Solo 2 resoluciones REALES:
   // "720p" del selector = 768P ($0.08/s) y "1080p" = 2K 2560×1440 ($0.13/s).
   // Duración: CUALQUIER entero 4-15, SIN escalones (6s se genera y factura de 6s).
   // Audio nativo sí ([SFX]). El costo real facturado sale en el log [MMAX 💰] de Render.
   { id: "minimax-h3", name: "MiniMax H3 (2K)", durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price720: 0.08, price1080: 0.13, emoji: "🐉", tier: "$$" },
-  { id: "hailuo-2.3", name: "Hailuo 2.3", durations: [4, 6, 8, 10], price720: 0.082, price1080: 0.082, emoji: "🐆", tier: "$$$" },
-  { id: "happyhorse-1.1", name: "HappyHorse 1.1", durations: [4, 5, 8, 10, 12, 15], price720: 0.099, price1080: 0.099, emoji: "🐴", tier: "$$$" },
-  { id: "wan-2.6", name: "Wan 2.6", durations: [5, 10, 15], price720: 0.10, price1080: 0.10, emoji: "🌀", tier: "$$$" },
   { id: "veo-3.1-fast-generate-preview", name: "Veo Fast", durations: [5, 8], price720: 0.10, price1080: 0.12, emoji: "🚀", tier: "$$$" },
   { id: "omni-flash", name: "Omni Flash", durations: [4, 6, 8], price720: 0.10, price1080: 0.18, emoji: "🌟", tier: "$$$" },
   { id: "sora-2", name: "Sora 2", durations: [4, 8, 12, 16, 20], price720: 0.10, price1080: 0.10, emoji: "🎦", tier: "$$$" },
+  // Wan 3.0 — API DIRECTA DashScope/Alibaba (no OpenRouter). Audio nativo sí ([SFX]).
+  // Duración: CUALQUIER entero 2-30 SIN escalones (se factura el segundo exacto).
+  // Hasta 30s por clip — el único junto a Ken Burns que pasa de 20s. 1080p cuesta 2×.
+  // El facturado real por video sale en el log [WAN3 ✅ ... facturado Ns] de Render.
+  { id: "wan3.0-video", name: "Wan 3.0 (30s)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30], price720: 0.10, price1080: 0.20, emoji: "🌀", tier: "$$$" },
   { id: "seedance-2.0-fast", name: "SD 2.0 Fast", durations: [5, 8, 10, 12, 15], price720: 0.121, price1080: 0.272, emoji: "🔥", tier: "$$$" },
   { id: "sora-2-pro-batch", name: "Sora Pro Batch (≤24h)", durations: [4, 8, 12, 16, 20], price720: 0.15, price1080: 0.15, emoji: "📦", tier: "$$" },
   { id: "seedance-2.0", name: "SD 2.0", durations: [5, 8, 10, 12, 15], price720: 0.151, price1080: 0.340, emoji: "💫", tier: "$$$$" },
-  { id: "sora-2-pro", name: "Sora 2 Pro", durations: [4, 8, 12, 16, 20], price720: 0.30, price1080: 0.30, emoji: "🎦", tier: "$$$$" },
-  { id: "veo-3.1-generate-preview", name: "Veo Full", durations: [5, 8], price720: 0.40, price1080: 0.40, emoji: "💎", tier: "$$$$" },
 ]
 
 
@@ -123,14 +121,14 @@ const TIER_CONFIG: Record<TierName, { label: string; emoji: string; color: strin
     label: "Premium",
     emoji: "🔴",
     color: "bg-red-600 hover:bg-red-500",
-    description: "Veo Fast + Full — máxima calidad",
+    description: "Veo Fast — máxima calidad",
     mapping: {
       3: "veo-3.1-fast-generate-preview",
       4: "veo-3.1-fast-generate-preview",
       5: "veo-3.1-fast-generate-preview",
       6: "veo-3.1-fast-generate-preview",
       7: "veo-3.1-fast-generate-preview",
-      8: "veo-3.1-generate-preview",
+      8: "veo-3.1-fast-generate-preview",
       9: "veo-3.1-fast-generate-preview",
       10: "veo-3.1-fast-generate-preview",
       11: "veo-3.1-fast-generate-preview",
@@ -169,8 +167,13 @@ function getCompatibleModels(duration: number): ModelInfo[] {
     // duración HACIA ARRIBA a su escalón (5/8/10/12/15) y el export recorta a la
     // ranura exacta. Una escena de 6s se genera de 8s y se recorta — nunca queda
     // bloqueada. (SD 1.0 va por Replicate, SIN snap en el worker: mantiene lista exacta.)
-    if (m.id === "seedance-1.5-pro" || m.id === "seedance-2.0-fast" || m.id === "seedance-2.0") {
+    if (m.id === "seedance-2.0-fast" || m.id === "seedance-2.0") {
       return duration <= m.durations[m.durations.length - 1]
+    }
+    // Wan 3.0: cualquier entero 2-30 SIN escalones (patrón H3). El worker redondea
+    // al entero HACIA ARRIBA (clamp 2-30) y el export recorta a la ranura exacta.
+    if (m.id === "wan3.0-video") {
+      return duration <= 30
     }
     // MiniMax H3: cualquier entero 4-15 SIN escalones. El worker redondea al entero
     // HACIA ARRIBA (clamp 4-15) y el export recorta a la ranura exacta — una escena
@@ -242,13 +245,18 @@ function getPrice(modelId: string, duration: number, resolution: Resolution): nu
   // el del ESCALÓN, no el de la ranura. Antes el estimado usaba la ranura y el cobro
   // real salía más alto (una escena de 6s se factura como 8s).
   let billed = duration
-  if (modelId.startsWith("sora") || modelId === "seedance-1.5-pro" || modelId === "seedance-2.0-fast" || modelId === "seedance-2.0") {
+  if (modelId.startsWith("sora") || modelId === "seedance-2.0-fast" || modelId === "seedance-2.0") {
     billed = m.durations.find((d) => duration <= d) ?? m.durations[m.durations.length - 1]
   }
   // MiniMax H3 factura el SEGUNDO ENTERO exacto (sin escalones): redondeo hacia
   // arriba con límites 4-15 — igual que clamp_seconds() del worker.
   if (modelId === "minimax-h3") {
     billed = Math.max(4, Math.min(15, Math.ceil(duration - 0.01)))
+  }
+  // Wan 3.0 factura el SEGUNDO ENTERO exacto (sin escalones): redondeo hacia
+  // arriba con límites 2-30 — igual que clamp_seconds() de wan3_video.py.
+  if (modelId === "wan3.0-video") {
+    billed = Math.max(2, Math.min(30, Math.ceil(duration - 0.01)))
   }
   return perSec * billed
 }
