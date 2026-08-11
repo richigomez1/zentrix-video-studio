@@ -794,15 +794,34 @@ export const ProductionPanel = memo(function ProductionPanel({
 
   const saveScenesToStorage = useCallback((scenesToSave: SceneState[]) => {
     if (!SCENE_STORAGE_KEY) return
+    const toSave = scenesToSave.map((s) => ({
+      index: s.index, model: s.model, resolution: s.resolution,
+      motionPrompt: s.motionPrompt, classification: s.classification,
+      kbConfig: s.kbConfig, status: s.status, videoUrl: s.videoUrl,
+      volume: s.volume, jobId: s.jobId,
+    }))
     try {
-      const toSave = scenesToSave.map((s) => ({
-        index: s.index, model: s.model, resolution: s.resolution,
-        motionPrompt: s.motionPrompt, classification: s.classification,
-        kbConfig: s.kbConfig, status: s.status, videoUrl: s.videoUrl,
-        volume: s.volume, jobId: s.jobId,
-      }))
       localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(toSave))
-    } catch {}
+    } catch {
+      // AUTOCURACIÓN (11-ago-2026): con el almacenamiento LLENO (la clave gigante
+      // legada del capítulo, u hojas de escenas de capítulos viejos), este guardado
+      // fallaba EN SILENCIO → cualquier refresco re-inicializaba las escenas y TODAS
+      // volvían al modelo por defecto (Draft) — el usuario elegía Pruna normal y el
+      // sistema generaba Draft "como quiso". Ahora: liberar espacio y reintentar.
+      try {
+        localStorage.removeItem("zentrix_loaded_chapter_data")
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const k = localStorage.key(i)
+          if (k && k.startsWith("zentrix_prod_scenes_") && k !== SCENE_STORAGE_KEY) {
+            localStorage.removeItem(k)
+          }
+        }
+        localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(toSave))
+        console.warn("[Zentrix] Almacenamiento liberado y selecciones guardadas (autocuración)")
+      } catch (e2) {
+        console.error("[Zentrix] No se pudieron guardar las selecciones de escenas:", e2)
+      }
+    }
   }, [SCENE_STORAGE_KEY])
 
   // Initialize scenes — duration FIXED from timeline + restore saved state
