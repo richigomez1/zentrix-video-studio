@@ -316,9 +316,22 @@ export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, init
 
   useEffect(() => {
     if (loadedChapterData) {
-      localStorage.setItem("zentrix_loaded_chapter_data", JSON.stringify(loadedChapterData))
+      // FIX (11-ago-2026): capítulos grandes (90+ escenas con descripciones largas)
+      // superaban la cuota de localStorage (~5MB) y TUMBABAN la app entera
+      // ("Setting the value of 'zentrix_loaded_chapter_data' exceeded the quota").
+      // Se persiste una versión LIGERA (sin escenas): suficiente para el encabezado
+      // tras recargar. Las escenas viven en memoria durante la sesión; tras un
+      // reload del navegador se recargan frescas re-abriendo el capítulo desde el
+      // panel Zentrix (backend = fuente de verdad). Y TODO setItem va en try/catch:
+      // el almacenamiento del navegador JAMÁS debe poder tumbar el editor.
+      const slim = { ...loadedChapterData, scenes: [] }
+      try {
+        localStorage.setItem("zentrix_loaded_chapter_data", JSON.stringify(slim))
+      } catch {
+        try { localStorage.removeItem("zentrix_loaded_chapter_data") } catch {}
+      }
     } else {
-      localStorage.removeItem("zentrix_loaded_chapter_data")
+      try { localStorage.removeItem("zentrix_loaded_chapter_data") } catch {}
     }
   }, [loadedChapterData])
 
