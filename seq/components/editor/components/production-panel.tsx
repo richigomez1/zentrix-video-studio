@@ -18,7 +18,8 @@ interface ModelInfo {
   durations: number[]
   price720: number
   price1080: number
-  price480?: number      // Solo modelos que VENDEN 480p (Seedance OR). Si falta, la UI no ofrece 480p.
+  price480?: number      // Solo modelos que VENDEN 480p (Seedance OR, Wan 2.2/2.5). Si falta, la UI no ofrece 480p.
+  resolutions?: Resolution[]  // Solo modelos que NO venden las 3; si falta = ["720p","1080p"] (+480p si hay price480)
   emoji: string
   tier: string
 }
@@ -27,7 +28,17 @@ const MODELS: ModelInfo[] = [
   // ── ORDEN POR PRECIO 720p, de barato a caro ──
   { id: "ken-burns", name: "Ken Burns", durations: [4, 5, 6, 8, 10, 12, 15], price720: 0, price1080: 0, emoji: "🎞", tier: "Gratis" },
   { id: "pruna-video-draft", name: "PrunaAI Draft", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.005, price1080: 0.01, emoji: "⚡", tier: "¢" },
+  // ── Wan 2.x — API DIRECTA DashScope (12-ago-2026). Precios QwenCloud verificados;
+  // el 1er cobro real por DashScope puede diferir: verificar factura. Todos i2v.
+  // wan2.2: clips FIJOS de 5s (escenas ≤5s; el export recorta) — el validador barato.
+  { id: "wan2.2-i2v-flash", name: "Wan 2.2 Flash (5s)", durations: [5], price480: 0.015, price720: 0.036, price1080: 0.036, resolutions: ["480p", "720p"], emoji: "🌬", tier: "¢" },
+  { id: "wan2.2-i2v-plus", name: "Wan 2.2 Plus (5s)", durations: [5], price480: 0.02, price720: 0.10, price1080: 0.10, resolutions: ["480p", "1080p"], emoji: "🍃", tier: "$" },
+  // wan2.6-flash SIN audio: 1080p a $0.0375/s — el competidor directo de Pruna Normal.
+  { id: "wan2.6-i2v-flash", name: "Wan 2.6 Flash (sin audio)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15], price720: 0.025, price1080: 0.0375, resolutions: ["720p", "1080p"], emoji: "🌪", tier: "$" },
   { id: "pruna-video", name: "PrunaAI", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.02, price1080: 0.04, emoji: "🎬", tier: "$" },
+  { id: "wan2.6-i2v-flash-audio", name: "Wan 2.6 Flash (audio)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15], price720: 0.05, price1080: 0.075, resolutions: ["720p", "1080p"], emoji: "🌪", tier: "$$" },
+  // wan2.5: escalones 5/10 con snap ↑ (patrón Sora); audio nativo automático.
+  { id: "wan2.5-i2v-preview", name: "Wan 2.5 (10s)", durations: [5, 10], price480: 0.05, price720: 0.10, price1080: 0.15, emoji: "🌊", tier: "$$$" },
   { id: "sora-2-batch", name: "Sora 2 Batch (≤24h)", durations: [4, 8, 12, 16, 20], price720: 0.05, price1080: 0.05, emoji: "📦", tier: "$" },
   { id: "veo-3.1-lite-generate-preview", name: "Veo Lite", durations: [5, 8], price720: 0.05, price1080: 0.08, emoji: "✨", tier: "$$" },
   // MiniMax H3 — API DIRECTA de MiniMax (no OpenRouter). Solo 2 resoluciones REALES:
@@ -55,6 +66,27 @@ const MODELS: ModelInfo[] = [
 
 
 const MODEL_MAP = Object.fromEntries(MODELS.map((m) => [m.id, m]))
+
+/* Resoluciones que un modelo REALMENTE vende (selector + degradaciones) */
+function resolutionsFor(modelId: string): Resolution[] {
+  const m = MODEL_MAP[modelId]
+  if (!m) return ["720p", "1080p"]
+  if (m.resolutions) return m.resolutions
+  return m.price480 !== undefined ? ["480p", "720p", "1080p"] : ["720p", "1080p"]
+}
+
+/* Ajusta una resolución al modelo: si la vende, se queda; si no, degrada HACIA
+   ABAJO en precio (1080p→720p→480p) — nunca puede acabar facturando MÁS de lo
+   que el estimado mostró. Solo sube si el modelo no vende nada por debajo. */
+function clampResToModel(modelId: string, res: Resolution): Resolution {
+  const list = resolutionsFor(modelId)
+  if (list.includes(res)) return res
+  const order: Resolution[] = ["480p", "720p", "1080p"]
+  const idx = order.indexOf(res)
+  for (let i = idx - 1; i >= 0; i--) if (list.includes(order[i])) return order[i]
+  for (let i = idx + 1; i < order.length; i++) if (list.includes(order[i])) return order[i]
+  return list[0] ?? "720p"
+}
 
 /* ── Tier Presets: auto-assign model by duration ── */
 type TierName = "economico" | "equilibrado" | "balanceado" | "premium"
@@ -176,6 +208,12 @@ function getCompatibleModels(duration: number): ModelInfo[] {
     if (m.id === "seedance-2.0-fast" || m.id === "seedance-2.0") {
       return duration <= m.durations[m.durations.length - 1]
     }
+    // Wan 2.2: clip FIJO de 5s (la API no acepta duration) → compatible con
+    // escenas ≤5s; el export recorta. Wan 2.5: escalones 5/10 con snap ↑ en el
+    // worker (patrón Sora) → compatible hasta 10s. Wan 2.6: enteros 2–15, su
+    // lista de durations ya los incluye todos (cae al includes de abajo).
+    if (m.id.startsWith("wan2.2-")) return duration <= 5
+    if (m.id === "wan2.5-i2v-preview") return duration <= 10
     // Wan 3.0: cualquier entero 2-30 SIN escalones (patrón H3). El worker redondea
     // al entero HACIA ARRIBA (clamp 2-30) y el export recorta a la ranura exacta.
     if (m.id === "wan3.0-video") {
@@ -255,7 +293,8 @@ function getPrice(modelId: string, duration: number, resolution: Resolution): nu
   // el del ESCALÓN, no el de la ranura. Antes el estimado usaba la ranura y el cobro
   // real salía más alto (una escena de 6s se factura como 8s).
   let billed = duration
-  if (modelId.startsWith("sora") || modelId === "seedance-2.0-fast" || modelId === "seedance-2.0") {
+  if (modelId.startsWith("sora") || modelId === "seedance-2.0-fast" || modelId === "seedance-2.0"
+      || modelId.startsWith("wan2.2-") || modelId === "wan2.5-i2v-preview") {
     billed = m.durations.find((d) => duration <= d) ?? m.durations[m.durations.length - 1]
   }
   // MiniMax H3 factura el SEGUNDO ENTERO exacto (sin escalones): redondeo hacia
@@ -624,11 +663,12 @@ function SceneCard({
         <select
           value={scene.model}
           onChange={(e) => {
-            // Si la escena está en 480p y el nuevo modelo NO la vende, degradar a 720p
-            // para que nunca viaje una resolución inválida al backend.
+            // Al cambiar de modelo, la resolución se ajusta a las que el nuevo
+            // modelo VENDE (degradación hacia abajo en precio si hace falta).
             const nm = e.target.value
             const patch: Partial<SceneState> = { model: nm }
-            if (scene.resolution === "480p" && !MODEL_MAP[nm]?.price480) patch.resolution = "720p"
+            const clamped = clampResToModel(nm, scene.resolution)
+            if (clamped !== scene.resolution) patch.resolution = clamped
             onChange(patch)
           }}
           disabled={scene.status === "generating" || scene.status === "done"}
@@ -656,9 +696,9 @@ function SceneCard({
           disabled={scene.status === "generating" || scene.status === "done"}
           className="w-16 px-1 py-1 text-[10px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded text-white text-center disabled:opacity-50"
         >
-          {MODEL_MAP[scene.model]?.price480 !== undefined && <option value="480p">480p</option>}
-          <option value="720p">720p</option>
-          <option value="1080p">1080p</option>
+          {resolutionsFor(scene.model).map((r) => (
+            <option key={r} value={r}>{r}</option>
+          ))}
         </select>
       </div>
 
@@ -879,11 +919,9 @@ export const ProductionPanel = memo(function ProductionPanel({
           index: s.index,
           model,
           duration,
-          // 480p guardado solo revive si el modelo (posiblemente cambiado arriba) la vende
-          resolution: ((): Resolution => {
-            const r = (saved?.resolution || "720p") as Resolution
-            return r === "480p" && MODEL_MAP[model]?.price480 === undefined ? "720p" : r
-          })(),
+          // La resolución guardada se ajusta a las que el modelo (posiblemente
+          // cambiado arriba) realmente vende
+          resolution: clampResToModel(model, (saved?.resolution || "720p") as Resolution),
           motionPrompt: saved?.motionPrompt || "",
           classification: saved?.classification || "",
           kbConfig: saved?.kbConfig || { ...KB_DEFAULT },
@@ -949,10 +987,8 @@ export const ProductionPanel = memo(function ProductionPanel({
         const compatible = getCompatibleModels(s.duration)
         const canUseGlobal = compatible.some((m) => m.id === globalModel)
         const appliedModel = canUseGlobal ? globalModel : s.model
-        // 480p solo si el modelo APLICADO la vende; si no, esa escena baja a 720p
-        const appliedRes: Resolution =
-          globalResolution === "480p" && MODEL_MAP[appliedModel]?.price480 === undefined
-            ? "720p" : globalResolution
+        // La resolución se ajusta por escena a las que el modelo APLICADO vende
+        const appliedRes: Resolution = clampResToModel(appliedModel, globalResolution)
         return {
           ...s,
           model: appliedModel,
@@ -986,8 +1022,7 @@ export const ProductionPanel = memo(function ProductionPanel({
         const model = MODEL_MAP[modelId]
         if (!model || !model.durations.includes(s.duration)) return s
         updated++
-        const tierRes: Resolution =
-          globalResolution === "480p" && model.price480 === undefined ? "720p" : globalResolution
+        const tierRes: Resolution = clampResToModel(modelId, globalResolution)
         return { ...s, model: modelId, resolution: tierRes }
       })
     )
@@ -1508,7 +1543,7 @@ export const ProductionPanel = memo(function ProductionPanel({
               onChange={(e) => setGlobalResolution(e.target.value as Resolution)}
               className="px-2 py-1 text-[10px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded text-white"
             >
-              <option value="480p">480p (solo Seedance)</option>
+              <option value="480p">480p (Seedance/Wan)</option>
               <option value="720p">720p</option>
               <option value="1080p">1080p</option>
             </select>
