@@ -1,1656 +1,1846 @@
 "use client"
 
-import type React from "react"
-import { useState, useRef, useCallback, useEffect } from "react"
-import type { MediaItem, TimelineClip, Marker, StoryboardPanel as StoryboardPanelType } from "../types"
-import type { Generation } from "@/seq/components/image-combiner/types"
-
-import { useFFmpeg } from "../hooks/use-ffmpeg"
-import { usePlayback } from "../hooks/use-playback"
-import { useTimelineState } from "../hooks/use-timeline-state"
-import { useRafCallback } from "../hooks/use-debounced-callback"
-import { useTimelineKeyboard } from "../hooks/use-timeline-keyboard"
-import { useStoryboard } from "../hooks/use-storyboard"
-import { useMediaGeneration } from "../hooks/use-media-generation"
-import { useMediaManagement } from "../hooks/use-media-management"
-import { useEditorKeyboard } from "../hooks/use-editor-keyboard"
-
-import { PreviewPlayer } from "./preview-player"
-import { EditorHeader } from "./editor-header"
-import { EditorSidebar, type SidebarView } from "./editor-sidebar"
-import { ErrorBoundary } from "./error-boundary"
-import { PanelErrorBoundary } from "./panel-error-boundary"
-import { SidebarPanelWrapper } from "./sidebar-panel-wrapper"
-
-import { ProjectLibrary } from "./project-library"
-import { ProductionPanel } from "./production-panel"
-import { SettingsPanel } from "./settings-panel"
-import { TransitionsPanel } from "./transitions-panel"
-import { InspectorPanel } from "./inspector-panel"
-import { StoryboardPanel as StoryboardPanelComponent } from "./storyboard-panel"
-import { ZentrixPanel, type ZentrixEditorData, type ZentrixChapterWithTiming } from "./zentrix-panel"
+import { memo, useState, useEffect, useCallback, useRef } from "react"
+import type { ZentrixEditorData, ZentrixScene } from "./zentrix-panel"
 import { ExportModal } from "./export-modal"
-import { ShortcutsModal } from "./shortcuts-modal"
-import { Timeline } from "./timeline"
-import { AddMarkerDialog } from "./add-marker-dialog"
-import { audioBufferToWav } from "../utils/audio-processing"
-import { useImageGeneration } from "@/seq/components/image-combiner/hooks/use-image-generation"
-import { useImageUpload } from "@/seq/components/image-combiner/hooks/use-image-upload"
-import { useAspectRatio } from "@/seq/components/image-combiner/hooks/use-aspect-ratio"
-import { useMobile } from "@/seq/hooks/use-mobile"
-import { useToastContext } from "@/seq/components/ui/sonner"
-import {
-  serializeProject,
-  deserializeProject,
-  saveProjectToFile,
-  loadProjectFromFile,
-  autosaveProject,
-  loadAutosave,
-  hasAutosave,
-  clearAutosave,
-} from "../services/project-service"
-import { UI_CONSTANTS, AUTOSAVE_CONSTANTS, FFMPEG_CONSTANTS } from "../constants"
-import { createDemoData } from "../app"
-import { StatusBar } from "./status-bar"
-import { SidebarProvider, SidebarInset } from "@/seq/components/ui/sidebar"
 
-// Define VideoConfig and IStoryboardPanel types as they were not exported from constants/types
-interface VideoConfig {
-  aspectRatio: string
-  useFastModel: boolean
+const BACKEND_URL =
+  typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://localhost:8000"
+    : "https://zentrix-backend-mcvk.onrender.com"
+
+const TOKEN_KEY = "zentrix_token"
+
+/* ── Model Database ── */
+interface ModelInfo {
+  id: string
+  name: string
+  durations: number[]
+  price720: number
+  price1080: number
+  price480?: number      // Solo modelos que VENDEN 480p (Seedance OR). Si falta, la UI no ofrece 480p.
+  emoji: string
+  tier: string
 }
 
-interface IStoryboardPanel extends StoryboardPanelType { }
+const MODELS: ModelInfo[] = [
+  // ── ORDEN POR PRECIO 720p, de barato a caro ──
+  { id: "ken-burns", name: "Ken Burns", durations: [4, 5, 6, 8, 10, 12, 15], price720: 0, price1080: 0, emoji: "🎞", tier: "Gratis" },
+  { id: "pruna-video-draft", name: "PrunaAI Draft", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.005, price1080: 0.01, emoji: "⚡", tier: "¢" },
+  { id: "pruna-video", name: "PrunaAI", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.02, price1080: 0.04, emoji: "🎬", tier: "$" },
+  { id: "sora-2-batch", name: "Sora 2 Batch (≤24h)", durations: [4, 8, 12, 16, 20], price720: 0.05, price1080: 0.05, emoji: "📦", tier: "$" },
+  { id: "veo-3.1-lite-generate-preview", name: "Veo Lite", durations: [5, 8], price720: 0.05, price1080: 0.08, emoji: "✨", tier: "$$" },
+  // MiniMax H3 — API DIRECTA de MiniMax (no OpenRouter). Solo 2 resoluciones REALES:
+  // "720p" del selector = 768P ($0.08/s) y "1080p" = 2K 2560×1440 ($0.13/s).
+  // Duración: CUALQUIER entero 4-15, SIN escalones (6s se genera y factura de 6s).
+  // Audio nativo sí ([SFX]). El costo real facturado sale en el log [MMAX 💰] de Render.
+  { id: "minimax-h3", name: "MiniMax H3 (2K)", durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price720: 0.08, price1080: 0.13, emoji: "🐉", tier: "$$" },
+  { id: "veo-3.1-fast-generate-preview", name: "Veo Fast", durations: [5, 8], price720: 0.10, price1080: 0.12, emoji: "🚀", tier: "$$$" },
+  { id: "omni-flash", name: "Omni Flash", durations: [4, 6, 8], price720: 0.10, price1080: 0.18, emoji: "🌟", tier: "$$$" },
+  { id: "sora-2", name: "Sora 2", durations: [4, 8, 12, 16, 20], price720: 0.10, price1080: 0.10, emoji: "🎦", tier: "$$$" },
+  // Wan 3.0 — API DIRECTA DashScope/Alibaba (no OpenRouter). Audio nativo sí ([SFX]).
+  // Duración: CUALQUIER entero 2-30 SIN escalones (se factura el segundo exacto).
+  // Hasta 30s por clip — el único junto a Ken Burns que pasa de 20s. 1080p cuesta 2×.
+  // El facturado real por video sale en el log [WAN3 ✅ ... facturado Ns] de Render.
+  { id: "wan3.0-video", name: "Wan 3.0 (30s)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30], price720: 0.10, price1080: 0.20, emoji: "🌀", tier: "$$$" },
+  // Seedance 480p HABILITADO 12-ago-2026 (854×480; vertical 480×854): la calidad de
+  // movimiento de Seedance a ~44% del precio de 720p — YouTube Super Resolution
+  // re-escala <1080p del lado del espectador. CORRECCIÓN de precios SD 2.0 Fast:
+  // el FAQ oficial de OpenRouter dice $4.20/M tokens (no 0.8× de SD 2.0) →
+  // 480p $0.0404 / 720p $0.0907 / 1080p $0.204. Verificar 1ª factura en Activity.
+  { id: "seedance-2.0-fast", name: "SD 2.0 Fast", durations: [5, 8, 10, 12, 15], price480: 0.0404, price720: 0.0907, price1080: 0.204, emoji: "🔥", tier: "$$$" },
+  { id: "sora-2-pro-batch", name: "Sora Pro Batch (≤24h)", durations: [4, 8, 12, 16, 20], price720: 0.15, price1080: 0.15, emoji: "📦", tier: "$$" },
+  { id: "seedance-2.0", name: "SD 2.0", durations: [5, 8, 10, 12, 15], price480: 0.067, price720: 0.151, price1080: 0.340, emoji: "💫", tier: "$$$$" },
+]
 
-type WebkitWindow = Window & {
-  webkitOfflineAudioContext?: typeof OfflineAudioContext
-}
 
-interface EditorProps {
-  initialMedia?: MediaItem[]
-  initialClips?: TimelineClip[]
-  initialStoryboard?: IStoryboardPanel[]
-  onBack: () => void
-}
+const MODEL_MAP = Object.fromEntries(MODELS.map((m) => [m.id, m]))
 
-export const Editor: React.FC<EditorProps> = ({ initialMedia, initialClips, initialStoryboard, onBack }) => {
-  const isMobile = useMobile()
-  const { toast: toastCtx } = useToastContext()
+/* ── Tier Presets: auto-assign model by duration ── */
+type TierName = "economico" | "equilibrado" | "balanceado" | "premium"
 
-  const ffmpeg = useFFmpeg()
-
-  useEffect(() => {
-    const preloadTimer = setTimeout(() => {
-      if (!ffmpeg.ffmpegLoaded && !ffmpeg.ffmpegLoading) {
-        ffmpeg.loadFFmpeg().catch(() => {
-          // Silently fail preload - will retry when needed
-        })
-      }
-    }, FFMPEG_CONSTANTS.PRELOAD_DELAY_MS)
-
-    return () => clearTimeout(preloadTimer)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const timeline = useTimelineState({
-    initialMedia,
-    initialClips,
-    initialStoryboard,
-    onPreviewStale: () => ffmpeg.setIsPreviewStale(true),
-  })
-
-  const [videoConfig, setVideoConfig] = useState<VideoConfig>({ aspectRatio: "16:9", useFastModel: true })
-
-  const storyboard = useStoryboard({
-    initialPanels: initialStoryboard,
-    videoConfig,
-    onMediaAdd: (media) => timeline.setMedia((prev) => [media, ...prev]),
-  })
-
-  const [defaultDuration, setDefaultDuration] = useState(5)
-  const mediaGeneration = useMediaGeneration({
-    defaultDuration,
-    onMediaAdd: (media) => timeline.setMedia((prev) => [media, ...prev]),
-    onMediaUpdate: (id, updates) =>
-      timeline.setMedia((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m))),
-    onAddToTimeline: timeline.handleAddToTimeline,
-  })
-
-  const mediaManagement = useMediaManagement({
-    defaultDuration,
-    onMediaAdd: (media) => timeline.setMedia((prev) => [media, ...prev]),
-    onMediaUpdate: (id, updates) =>
-      timeline.setMedia((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m))),
-  })
-
-  const handleExportAudio = useCallback(
-    async (clipIds: string[]) => {
-      // Filter to only audio track clips and sort by start time
-      const clips = timeline.timelineClips.filter((c) => clipIds.includes(c.id)).sort((a, b) => a.start - b.start)
-
-      if (clips.length === 0) return
-
-      // Verify all clips are on audio tracks
-      const audioClips = clips.filter((clip) => {
-        const track = timeline.tracks.find((t) => t.id === clip.trackId)
-        return track?.type === "audio"
-      })
-
-      if (audioClips.length === 0) {
-        toastCtx.error("No audio clips selected")
-        return
-      }
-
-      try {
-        toastCtx.info(`Processing ${audioClips.length} audio clip${audioClips.length > 1 ? "s" : ""}...`)
-
-        const audioContext = new (
-          window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-        )()
-
-        // Decode all audio sources
-        const decodedClips: Array<{
-          clip: (typeof audioClips)[0]
-          buffer: AudioBuffer
-        }> = []
-
-        for (const clip of audioClips) {
-          const media = timeline.mediaMap[clip.mediaId]
-          if (!media?.url) continue
-
-          const response = await fetch(media.url)
-          const arrayBuffer = await response.arrayBuffer()
-          const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0))
-          decodedClips.push({ clip, buffer: audioBuffer })
-        }
-
-        if (decodedClips.length === 0) {
-          toastCtx.error("No audio sources found")
-          audioContext.close()
-          return
-        }
-
-        // Calculate total duration based on clip positions
-        const firstClipStart = Math.min(...audioClips.map((c) => c.start))
-        const lastClipEnd = Math.max(...audioClips.map((c) => c.start + c.duration))
-        const totalDuration = lastClipEnd - firstClipStart
-
-        // Use the sample rate from the first clip
-        const sampleRate = decodedClips[0].buffer.sampleRate
-        const totalSamples = Math.ceil(totalDuration * sampleRate)
-        const numChannels = Math.max(...decodedClips.map((d) => d.buffer.numberOfChannels))
-
-        // Create output buffer
-        const outputBuffer = audioContext.createBuffer(numChannels, totalSamples, sampleRate)
-
-        // Mix all clips into the output buffer
-        for (const { clip, buffer } of decodedClips) {
-          const clipStartInOutput = (clip.start - firstClipStart) * sampleRate
-          const sourceStartSample = Math.floor(clip.offset * buffer.sampleRate)
-          const sourceDurationSamples = Math.floor(clip.duration * buffer.sampleRate)
-          const sourceEndSample = Math.min(sourceStartSample + sourceDurationSamples, buffer.length)
-
-          const fadeInSamples = Math.floor((clip.fadeIn || 0) * buffer.sampleRate)
-          const fadeOutSamples = Math.floor((clip.fadeOut || 0) * buffer.sampleRate)
-          const clipSamples = sourceEndSample - sourceStartSample
-
-          for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
-            const sourceData = buffer.getChannelData(channel)
-            const destData = outputBuffer.getChannelData(channel)
-
-            for (let i = 0; i < clipSamples; i++) {
-              const destIndex = Math.floor(clipStartInOutput) + i
-              if (destIndex >= 0 && destIndex < totalSamples) {
-                let sample = sourceData[sourceStartSample + i]
-
-                // Apply fade in
-                if (fadeInSamples > 0 && i < fadeInSamples) {
-                  sample *= i / fadeInSamples
-                }
-
-                // Apply fade out
-                if (fadeOutSamples > 0 && i >= clipSamples - fadeOutSamples) {
-                  const fadeOutPosition = clipSamples - i
-                  sample *= fadeOutPosition / fadeOutSamples
-                }
-
-                // Mix audio (add samples together)
-                destData[destIndex] += sample
-              }
-            }
-          }
-        }
-
-        // Normalize to prevent clipping if multiple clips overlap
-        for (let channel = 0; channel < numChannels; channel++) {
-          const data = outputBuffer.getChannelData(channel)
-          let maxAbs = 0
-          for (let i = 0; i < data.length; i++) {
-            maxAbs = Math.max(maxAbs, Math.abs(data[i]))
-          }
-          if (maxAbs > 1) {
-            for (let i = 0; i < data.length; i++) {
-              data[i] /= maxAbs
-            }
-          }
-        }
-
-        const wavData = audioBufferToWav(outputBuffer)
-        const blob = new Blob([wavData], { type: "audio/wav" })
-        const url = URL.createObjectURL(blob)
-
-        const a = document.createElement("a")
-        a.href = url
-        a.download = `audio_export_${audioClips.length > 1 ? "combined_" : ""}${Date.now()}.wav`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-
-        setTimeout(() => URL.revokeObjectURL(url), 1000)
-        audioContext.close()
-
-        toastCtx.success(
-          audioClips.length > 1
-            ? `${audioClips.length} audio clips combined and downloaded`
-            : "Audio file downloaded successfully",
-        )
-      } catch (error) {
-        console.error("Audio export failed:", error)
-        toastCtx.error("Failed to export audio clip")
-      }
+const TIER_CONFIG: Record<TierName, { label: string; emoji: string; color: string; description: string; mapping: Record<number, string> }> = {
+  economico: {
+    label: "Económico",
+    emoji: "🟢",
+    color: "bg-emerald-600 hover:bg-emerald-500",
+    description: "PrunaAI Draft — $0.005/seg",
+    mapping: {
+      3: "pruna-video-draft",
+      4: "pruna-video-draft",
+      5: "pruna-video-draft",
+      6: "pruna-video-draft",
+      7: "pruna-video-draft",
+      8: "pruna-video-draft",
+      9: "pruna-video-draft",
+      10: "pruna-video-draft",
+      11: "pruna-video-draft",
+      12: "pruna-video-draft",
+      13: "pruna-video-draft",
+      14: "pruna-video-draft",
+      15: "pruna-video-draft",
     },
-    [timeline.timelineClips, timeline.tracks, timeline.mediaMap, toastCtx],
-  )
-
-  const playback = usePlayback({
-    timelineClips: timeline.timelineClips,
-    tracks: timeline.tracks,
-    mediaMap: timeline.mediaMap,
-    timelineDuration: timeline.timelineDuration,
-    isExporting: ffmpeg.isExporting,
-    isRendering: ffmpeg.isRendering,
-  })
-
-  useTimelineKeyboard({
-    clips: timeline.timelineClips,
-    tracks: timeline.tracks,
-    selectedClipIds: timeline.selectedClipIds,
-    currentTime: playback.currentTime,
-    duration: timeline.timelineDuration,
-    zoomLevel: timeline.zoomLevel,
-    isPlaying: playback.isPlaying,
-    onSelectClips: timeline.handleSelectClips,
-    onDeleteClip: timeline.handleDeleteClip,
-    onDuplicateClip: timeline.handleDuplicateClip,
-    onClipUpdate: timeline.handleClipUpdate,
-    onSeek: playback.handleSeek,
-    onTogglePlayback: () => playback.setIsPlaying((p) => !p),
-    onUndo: timeline.undo,
-    onRedo: timeline.redo,
-  })
-
-  // UI State - Use constants for default values
-  const [activeView, setActiveView] = useState<SidebarView>("library")
-  const [loadedChapterId, setLoadedChapterId] = useState<string | null>(() => {
-    if (typeof window !== "undefined") return localStorage.getItem("zentrix_loaded_chapter_id")
-    return null
-  })
-  const [loadedChapterData, setLoadedChapterData] = useState<ZentrixEditorData | null>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("zentrix_loaded_chapter_data")
-        return saved ? JSON.parse(saved) : null
-      } catch { return null }
-    }
-    return null
-  })
-  const [isProductionModalOpen, setIsProductionModalOpen] = useState(false)
-
-  // Persist chapter data to localStorage
-  useEffect(() => {
-    if (loadedChapterId) {
-      localStorage.setItem("zentrix_loaded_chapter_id", loadedChapterId)
-    } else {
-      localStorage.removeItem("zentrix_loaded_chapter_id")
-    }
-  }, [loadedChapterId])
-
-  useEffect(() => {
-    if (loadedChapterData) {
-      // FIX (11-ago-2026): capítulos grandes (90+ escenas con descripciones largas)
-      // superaban la cuota de localStorage (~5MB) y TUMBABAN la app entera
-      // ("Setting the value of 'zentrix_loaded_chapter_data' exceeded the quota").
-      // Se persiste una versión LIGERA (sin escenas): suficiente para el encabezado
-      // tras recargar. Las escenas viven en memoria durante la sesión; tras un
-      // reload del navegador se recargan frescas re-abriendo el capítulo desde el
-      // panel Zentrix (backend = fuente de verdad). Y TODO setItem va en try/catch:
-      // el almacenamiento del navegador JAMÁS debe poder tumbar el editor.
-      const slim = { ...loadedChapterData, scenes: [] }
-      try {
-        localStorage.setItem("zentrix_loaded_chapter_data", JSON.stringify(slim))
-      } catch {
-        try { localStorage.removeItem("zentrix_loaded_chapter_data") } catch {}
-      }
-    } else {
-      try { localStorage.removeItem("zentrix_loaded_chapter_data") } catch {}
-    }
-  }, [loadedChapterData])
-
-  const [isPanelOpen, setIsPanelOpen] = useState(true)
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [apiKeyReady, setApiKeyReady] = useState(false) // Was not in updates, keeping it
-  // const [defaultDuration, setDefaultDuration] = useState(5) // REMOVED, now handled by mediaGeneration hook
-  const [playerZoom, setPlayerZoom] = useState(1)
-  const [isCinemaMode, setIsCinemaMode] = useState(false)
-  const [timelineHeight, setTimelineHeight] = useState<number>(UI_CONSTANTS.TIMELINE_DEFAULT_HEIGHT)
-  const [isResizingTimeline, setIsResizingTimeline] = useState(false)
-  const [sidebarWidth, setSidebarWidth] = useState<number>(UI_CONSTANTS.SIDEBAR_DEFAULT_WIDTH)
-  const [isResizingSidebar, setIsResizingSidebar] = useState(false)
-  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false)
-  const [isSafeGuidesVisible, setIsSafeGuidesVisible] = useState(false)
-  const [isLooping, setIsLooping] = useState(false) // Added for loop playback
-
-  const [isExportModalOpen, setIsExportModalOpen] = useState(false) // Added back for the modal itself
-
-  // Add markers state after other useState hooks
-  const [markers, setMarkers] = useState<Marker[]>([])
-  const [showAddMarkerDialog, setShowAddMarkerDialog] = useState(false)
-
-  const resizeRef = useRef<{ startY: number; startHeight: number } | null>(null)
-  const sidebarResizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
-
-  const objectUrlsRef = useRef<string[]>([])
-  const isMountedRef = useRef(true)
-
-  const saveFrameRef = useRef<(() => void) | null>(null)
-
-  const [isSaving, setIsSaving] = useState(false)
-
-  useEffect(() => {
-    isMountedRef.current = true
-    return () => {
-      isMountedRef.current = false
-      objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
-    }
-  }, [])
-
-  const handleTimelineResize = useRafCallback((e: MouseEvent) => {
-    if (resizeRef.current) {
-      const deltaY = resizeRef.current.startY - e.clientY
-      const maxH = typeof window !== "undefined" ? window.innerHeight - 300 : UI_CONSTANTS.TIMELINE_MAX_HEIGHT
-      const newHeight = Math.max(
-        UI_CONSTANTS.TIMELINE_MIN_HEIGHT,
-        Math.min(maxH, resizeRef.current.startHeight + deltaY),
-      )
-      setTimelineHeight(newHeight)
-    }
-  })
-
-  const handleSidebarResize = useRafCallback((e: MouseEvent) => {
-    if (sidebarResizeRef.current) {
-      const deltaX = e.clientX - sidebarResizeRef.current.startX
-      const proposedWidth = sidebarResizeRef.current.startWidth + deltaX
-      if (proposedWidth < 150) {
-        setIsPanelOpen(false)
-        setIsResizingSidebar(false)
-      } else {
-        const newWidth = Math.max(
-          UI_CONSTANTS.SIDEBAR_MIN_WIDTH,
-          Math.min(UI_CONSTANTS.SIDEBAR_MAX_WIDTH, proposedWidth),
-        )
-        setSidebarWidth(newWidth)
-      }
-    }
-  })
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isResizingTimeline) {
-        handleTimelineResize(e)
-      }
-      if (isResizingSidebar) {
-        handleSidebarResize(e)
-      }
-    }
-    const handleMouseUp = () => {
-      setIsResizingTimeline(false)
-      setIsResizingSidebar(false)
-      resizeRef.current = null
-      sidebarResizeRef.current = null
-      document.body.style.cursor = "default"
-    }
-
-    if (isResizingTimeline || isResizingSidebar) {
-      document.body.style.cursor = isResizingTimeline ? "ns-resize" : "ew-resize"
-      window.addEventListener("mousemove", handleMouseMove)
-      window.addEventListener("mouseup", handleMouseUp)
-      return () => {
-        window.removeEventListener("mousemove", handleMouseMove)
-        window.removeEventListener("mouseup", handleMouseUp)
-        document.body.style.cursor = "default"
-      }
-    }
-  }, [isResizingTimeline, isResizingSidebar, handleTimelineResize, handleSidebarResize])
-
-  useEffect(() => {
-    if (ffmpeg.isPreviewStale && playback.isPreviewPlayback) {
-      playback.setIsPreviewPlayback(false)
-    }
-  }, [ffmpeg.isPreviewStale, playback])
-
-  // Storyboard Handlers
-  const handleAddStoryboardToTimeline = useCallback(
-    (panel: IStoryboardPanel) => {
-      if (!panel.videoUrl) return
-
-      let mediaId = panel.mediaId
-      if (!mediaId || !timeline.mediaMap[mediaId]) {
-        mediaId = `media-sb-fallback-${panel.id}`
-        const newMedia: MediaItem = {
-          id: mediaId,
-          url: panel.videoUrl,
-          prompt: panel.prompt,
-          duration: panel.duration || 5,
-          aspectRatio: videoConfig.aspectRatio,
-          resolution: { width: 1280, height: 720 },
-          status: "ready",
-          type: "video",
-        }
-        timeline.setMedia((prev) => [newMedia, ...prev])
-      }
-
-      timeline.pushToHistory()
-      const trackId = "v1"
-      const clipsOnTrack = timeline.timelineClips.filter((c) => c.trackId === trackId)
-      const start = clipsOnTrack.length > 0 ? Math.max(...clipsOnTrack.map((c) => c.start + c.duration)) : 0
-      const newClip: TimelineClip = {
-        speed: 1,
-        id: `clip-sb-${Date.now()}`,
-        mediaId: mediaId!,
-        trackId,
-        start,
-        duration: panel.duration || 5,
-        offset: 0,
-        volume: 1,
-      }
-      timeline.setTimelineClips((prev) => [...prev, newClip])
-      timeline.setSelectedClipIds([newClip.id])
+  },
+  equilibrado: {
+    label: "Equilibrado",
+    emoji: "🟡",
+    color: "bg-amber-600 hover:bg-amber-500",
+    description: "PrunaAI Normal — $0.02/seg",
+    mapping: {
+      3: "pruna-video",
+      4: "pruna-video",
+      5: "pruna-video",
+      6: "pruna-video",
+      7: "pruna-video",
+      8: "pruna-video",
+      9: "pruna-video",
+      10: "pruna-video",
+      11: "pruna-video",
+      12: "pruna-video",
+      13: "pruna-video",
+      14: "pruna-video",
+      15: "pruna-video",
     },
-    [timeline, videoConfig],
+  },
+  balanceado: {
+    label: "Balanceado",
+    emoji: "🟠",
+    color: "bg-orange-600 hover:bg-orange-500",
+    description: "PrunaAI + Veo Lite — mejor calidad",
+    mapping: {
+      3: "pruna-video",
+      4: "pruna-video",
+      5: "veo-3.1-lite-generate-preview",
+      6: "pruna-video",
+      7: "pruna-video",
+      8: "veo-3.1-lite-generate-preview",
+      9: "pruna-video",
+      10: "pruna-video",
+      11: "pruna-video",
+      12: "pruna-video",
+      13: "pruna-video",
+      14: "pruna-video",
+      15: "pruna-video",
+    },
+  },
+  premium: {
+    label: "Premium",
+    emoji: "🔴",
+    color: "bg-red-600 hover:bg-red-500",
+    description: "Veo Fast — máxima calidad",
+    mapping: {
+      3: "veo-3.1-fast-generate-preview",
+      4: "veo-3.1-fast-generate-preview",
+      5: "veo-3.1-fast-generate-preview",
+      6: "veo-3.1-fast-generate-preview",
+      7: "veo-3.1-fast-generate-preview",
+      8: "veo-3.1-fast-generate-preview",
+      9: "veo-3.1-fast-generate-preview",
+      10: "veo-3.1-fast-generate-preview",
+      11: "veo-3.1-fast-generate-preview",
+      12: "veo-3.1-fast-generate-preview",
+      13: "veo-3.1-fast-generate-preview",
+      14: "veo-3.1-fast-generate-preview",
+      15: "veo-3.1-fast-generate-preview",
+    },
+  },
+}
+
+// All possible durations across all models
+const ALL_DURATIONS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 20]
+
+type Resolution = "480p" | "720p" | "1080p"
+
+/* ── Helper: snap raw seconds to nearest standard duration ── */
+function snapToStandardDuration(rawSeconds: number): number {
+  if (rawSeconds <= 0) return 5
+  return ALL_DURATIONS.reduce((prev, curr) =>
+    Math.abs(curr - rawSeconds) < Math.abs(prev - rawSeconds) ? curr : prev
   )
+}
 
-  // Image generation state (for create panel)
-  const [prompt, setPrompt] = useState("A beautiful landscape with mountains and a lake at sunset")
-  const [useUrls, setUseUrls] = useState(false)
-  const [isEnhancingMaster, setIsEnhancingMaster] = useState(false)
-  const [isEnhancing, setIsEnhancing] = useState(false)
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null)
-  const [apiKeyMissing, setApiKeyMissing] = useState(false)
+/* ── Helper: get models that support a specific duration ── */
+function getCompatibleModels(duration: number): ModelInfo[] {
+  return MODELS.filter((m) => {
+    // Sora vende escalones fijos (4/8/12/16/20s) pero el sistema redondea HACIA
+    // ARRIBA al escalón y el director escribe la "cola de sostenimiento" (la acción
+    // termina en la ranura; el sobrante es un HOLD que el export recorta). Por eso
+    // CUALQUIER duración hasta su máximo es compatible con Sora.
+    if (m.id.startsWith("sora")) {
+      return duration <= m.durations[m.durations.length - 1]
+    }
+    // Seedance vía OpenRouter recibe el MISMO trato que Sora: el worker redondea la
+    // duración HACIA ARRIBA a su escalón (5/8/10/12/15) y el export recorta a la
+    // ranura exacta. Una escena de 6s se genera de 8s y se recorta — nunca queda
+    // bloqueada. (SD 1.0 va por Replicate, SIN snap en el worker: mantiene lista exacta.)
+    if (m.id === "seedance-2.0-fast" || m.id === "seedance-2.0") {
+      return duration <= m.durations[m.durations.length - 1]
+    }
+    // Wan 3.0: cualquier entero 2-30 SIN escalones (patrón H3). El worker redondea
+    // al entero HACIA ARRIBA (clamp 2-30) y el export recorta a la ranura exacta.
+    if (m.id === "wan3.0-video") {
+      return duration <= 30
+    }
+    // MiniMax H3: cualquier entero 4-15 SIN escalones. El worker redondea al entero
+    // HACIA ARRIBA (clamp 4-15) y el export recorta a la ranura exacta — una escena
+    // de 3s se genera de 4s y se recorta. Compatible con cualquier duración ≤ 15.
+    if (m.id === "minimax-h3") {
+      return duration <= m.durations[m.durations.length - 1]
+    }
+    return m.durations.includes(duration)
+  })
+}
 
-  // Generated item state for CreatePanel
-  const [generatedItem, setGeneratedItem] = useState<{ url: string; type: "video" | "image" } | null>(null)
+/* ── Ken Burns Config ── */
+interface KBConfig {
+  mode: "standard" | "parallax"
+  preset: string | null
+  start_zoom: number
+  end_zoom: number
+  start_x: number
+  start_y: number
+  end_x: number
+  end_y: number
+  overlay: "none" | "dust" | "fog" | "rain" | "grain" | "ash"
+}
 
-  const showToast = (message: string, type: "success" | "error" = "success") => {
-    setToast({ message, type })
-    setTimeout(() => setToast(null), 3000)
+const KB_DEFAULT: KBConfig = { mode: "standard", preset: "zoom_in_center", start_zoom: 100, end_zoom: 110, start_x: 50, start_y: 50, end_x: 50, end_y: 50, overlay: "none" }
+
+const KB_OVERLAYS: { id: KBConfig["overlay"]; label: string; emoji: string }[] = [
+  { id: "none",  label: "Sin overlay",  emoji: "⚪" },
+  { id: "dust",  label: "Polvo",        emoji: "✨" },
+  { id: "fog",   label: "Niebla",       emoji: "🌫" },
+  { id: "rain",  label: "Lluvia",       emoji: "🌧" },
+  { id: "grain", label: "Grano",        emoji: "🎞" },
+  { id: "ash",   label: "Ceniza",       emoji: "🔥" },
+]
+
+const KB_PRESETS: { id: string; label: string; emoji: string; config: Omit<KBConfig, "preset"> }[] = [
+  { id: "zoom_in_center",  label: "Zoom In",     emoji: "🔍", config: { mode: "standard", start_zoom: 100, end_zoom: 110, start_x: 50, start_y: 50, end_x: 50, end_y: 50, overlay: "none" } },
+  { id: "zoom_out_center", label: "Zoom Out",    emoji: "🔭", config: { mode: "standard", start_zoom: 112, end_zoom: 100, start_x: 50, start_y: 50, end_x: 50, end_y: 50, overlay: "none" } },
+  { id: "zoom_in_top",     label: "Zoom Arriba", emoji: "⬆️", config: { mode: "standard", start_zoom: 100, end_zoom: 115, start_x: 50, start_y: 25, end_x: 50, end_y: 25, overlay: "none" } },
+  { id: "zoom_in_bottom",  label: "Zoom Abajo",  emoji: "⬇️", config: { mode: "standard", start_zoom: 100, end_zoom: 115, start_x: 50, start_y: 75, end_x: 50, end_y: 75, overlay: "none" } },
+  { id: "pan_left",        label: "Pan →",       emoji: "➡️", config: { mode: "standard", start_zoom: 112, end_zoom: 112, start_x: 20, start_y: 50, end_x: 80, end_y: 50, overlay: "none" } },
+  { id: "pan_right",       label: "Pan ←",       emoji: "⬅️", config: { mode: "standard", start_zoom: 112, end_zoom: 112, start_x: 80, start_y: 50, end_x: 20, end_y: 50, overlay: "none" } },
+  { id: "pan_up",          label: "Pan ↑",       emoji: "⏫", config: { mode: "standard", start_zoom: 112, end_zoom: 112, start_x: 50, start_y: 75, end_x: 50, end_y: 25, overlay: "none" } },
+  { id: "pan_down",        label: "Pan ↓",       emoji: "⏬", config: { mode: "standard", start_zoom: 112, end_zoom: 112, start_x: 50, start_y: 25, end_x: 50, end_y: 75, overlay: "none" } },
+]
+
+/* ── Scene State ── */
+interface SceneState {
+  index: number
+  model: string
+  duration: number       // FIXED — snapped from timeline, does not change
+  resolution: Resolution
+  motionPrompt: string
+  classification: string
+  kbConfig: KBConfig
+  status: "pending" | "ready" | "generating" | "done" | "error"
+  videoUrl: string | null
+  errorMsg: string
+  volume: number         // 0-200, default 100 (percentage)
+  jobId: string | null   // for cancel functionality
+}
+
+function getPrice(modelId: string, duration: number, resolution: Resolution): number {
+  const m = MODEL_MAP[modelId]
+  if (!m) return 0
+  // 480p: solo los modelos con price480 la venden; si por cualquier razón llega 480p
+  // a un modelo sin ella, se estima como 720p (el peor caso real: el worker genera 720p).
+  const perSec = resolution === "1080p" ? m.price1080
+    : resolution === "480p" ? (m.price480 ?? m.price720)
+    : m.price720
+  // Modelos con escalones fijos (Sora 4/8/12/16/20; Seedance OpenRouter 5/8/10/12/15):
+  // se genera el escalón SIGUIENTE hacia arriba y el export recorta — el costo real es
+  // el del ESCALÓN, no el de la ranura. Antes el estimado usaba la ranura y el cobro
+  // real salía más alto (una escena de 6s se factura como 8s).
+  let billed = duration
+  if (modelId.startsWith("sora") || modelId === "seedance-2.0-fast" || modelId === "seedance-2.0") {
+    billed = m.durations.find((d) => duration <= d) ?? m.durations[m.durations.length - 1]
   }
+  // MiniMax H3 factura el SEGUNDO ENTERO exacto (sin escalones): redondeo hacia
+  // arriba con límites 4-15 — igual que clamp_seconds() del worker.
+  if (modelId === "minimax-h3") {
+    billed = Math.max(4, Math.min(15, Math.ceil(duration - 0.01)))
+  }
+  // Wan 3.0 factura el SEGUNDO ENTERO exacto (sin escalones): redondeo hacia
+  // arriba con límites 2-30 — igual que clamp_seconds() de wan3_video.py.
+  if (modelId === "wan3.0-video") {
+    billed = Math.max(2, Math.min(30, Math.ceil(duration - 0.01)))
+  }
+  return perSec * billed
+}
 
-  const {
-    image1,
-    image1Preview,
-    image1Url,
-    image2,
-    image2Preview,
-    image2Url,
-    handleImageUpload,
-    handleUrlChange, // Not used in the provided snippet, but kept for completeness
-    clearImage, // Not used in the provided snippet, but kept for completeness
-  } = useImageUpload()
+/* ── API Helper ── */
+async function apiFetch(path: string, opts: RequestInit = {}) {
+  const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : ""
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(opts.headers as Record<string, string> || {}),
+  }
+  if (token) headers["Authorization"] = `Bearer ${token}`
+  const res = await fetch(BACKEND_URL + path, { ...opts, headers })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || `Error ${res.status}`)
+  return data
+}
 
-  const { aspectRatio, setAspectRatio, availableAspectRatios } = useAspectRatio()
+/* ── Props ── */
+export interface ProductionPanelProps {
+  isOpen: boolean
+  onClose: () => void
+  chapterData: ZentrixEditorData | null
+  chapterId: string | null
+  onVideoGenerated: (sceneIndex: number, videoUrl: string) => void
+}
 
-  const [persistedGenerations, setPersistedGenerations] = useState<Generation[]>([])
-  const addGeneration = useCallback(async (generation: Generation) => {
-    setPersistedGenerations((prev) => [...prev, generation])
-  }, [])
+/* ── Scene Card ── */
+function SceneCard({
+  scene,
+  sceneData,
+  savedKBPresets,
+  onSaveKBPreset,
+  onAutoPrompt,
+  onDeleteKBPreset,
+  onApplyKBToAll,
+  onChange,
+  onGenerate,
+  onCancel,
+  onDelete,
+  onOmniTest,
+}: {
+  scene: SceneState
+  sceneData: ZentrixScene
+  savedKBPresets: { name: string; config: KBConfig }[]
+  onSaveKBPreset: (name: string, config: KBConfig) => void
+  onAutoPrompt: (index: number) => void
+  onDeleteKBPreset: (name: string) => void
+  onApplyKBToAll: (config: KBConfig) => void
+  onChange: (updates: Partial<SceneState>) => void
+  onGenerate: () => void
+  onCancel: () => void
+  onDelete: () => void
+  onOmniTest: () => void
+}) {
+  const cost = getPrice(scene.model, scene.duration, scene.resolution)
+  const hasPrompt = scene.motionPrompt.trim().length > 0
+  const isVeo = scene.model.startsWith("veo-")
+  // Detección automática de contenido VERTICAL (9:16): al cargar la imagen/video se miden
+  // sus dimensiones reales; si es más alto que ancho, la miniatura usa object-contain
+  // (se ve COMPLETA, con franjas laterales) en vez de object-cover (que cortaba cabezas).
+  const [imgVertical, setImgVertical] = useState(false)
+  const [vidVertical, setVidVertical] = useState(false)
 
-  const {
-    selectedGenerationId,
-    setSelectedGenerationId,
-    imageLoaded,
-    setImageLoaded,
-    generateImage: runGeneration,
-    cancelGeneration,
-    loadGeneratedAsInput,
-  } = useImageGeneration({
-    prompt,
-    aspectRatio,
-    image1,
-    image2,
-    image1Url,
-    image2Url,
-    useUrls,
-    generations: persistedGenerations,
-    setGenerations: setPersistedGenerations,
-    addGeneration,
-    onToast: showToast,
-    onImageUpload: handleImageUpload,
-    onApiKeyMissing: () => setApiKeyMissing(true),
+  return (
+    <div className={`rounded-xl border transition-all ${
+      scene.status === "done" ? "border-green-500/40 bg-green-500/5" :
+      scene.status === "generating" ? "border-amber-500/40 bg-amber-500/5" :
+      scene.status === "error" ? "border-red-500/40 bg-red-500/5" :
+      hasPrompt ? "border-indigo-500/30 bg-indigo-500/5" :
+      "border-[var(--border-default)] bg-[var(--surface-1)]"
+    }`}>
+      {/* Top: Image + Video preview */}
+      <div className="flex gap-2 p-3 pb-2">
+        {/* Image thumbnail */}
+        <div className="w-28 h-20 rounded-lg overflow-hidden bg-[var(--surface-2)] flex-shrink-0 relative">
+          {sceneData.image_url ? (
+            <img src={sceneData.image_url} alt={`Escena ${scene.index + 1}`} onLoad={(e) => { const t = e.target as HTMLImageElement; setImgVertical(t.naturalHeight > t.naturalWidth) }} className={`w-full h-full ${imgVertical ? "object-contain" : "object-cover"}`} />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-[var(--text-tertiary)] text-xs">
+              Sin imagen
+            </div>
+          )}
+          <div className="absolute top-1 left-1 bg-black/70 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
+            E{scene.index + 1}
+          </div>
+          {scene.classification && (
+            <div className="absolute bottom-1 left-1 bg-black/70 text-[9px] px-1.5 py-0.5 rounded text-blue-300">
+              {(scene.classification === "landscape" || scene.classification === "paisaje") ? "🏔 Paisaje" :
+               (scene.classification === "character" || scene.classification === "narrativa") ? "🧑 Personaje" :
+               (scene.classification === "detalle") ? "🔬 Detalle" : "🎭 Complejo"}
+            </div>
+          )}
+        </div>
+
+        {/* Video preview or status */}
+        <div className="w-28 h-20 rounded-lg overflow-hidden bg-[var(--surface-2)] flex-shrink-0 flex items-center justify-center">
+          {scene.status === "done" && scene.videoUrl ? (
+            <div className="relative w-full h-full group">
+              <video
+                src={scene.videoUrl}
+                className={`w-full h-full ${vidVertical ? "object-contain" : "object-cover"}`}
+                muted
+                loop
+                playsInline
+                onLoadedMetadata={(e) => { const v = e.target as HTMLVideoElement; setVidVertical(v.videoHeight > v.videoWidth) }}
+                onMouseEnter={(e) => (e.target as HTMLVideoElement).play()}
+                onMouseLeave={(e) => { const v = e.target as HTMLVideoElement; v.pause(); v.currentTime = 0 }}
+              />
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center gap-2">
+                <button
+                  className="hidden group-hover:block text-white text-[10px] font-bold bg-black/60 px-2 py-1 rounded cursor-pointer hover:bg-black/80"
+                  onClick={() => window.open(scene.videoUrl!, '_blank')}
+                >
+                  ▶ Ver
+                </button>
+                <button
+                  className="hidden group-hover:block text-white text-[10px] font-bold bg-red-600/80 px-2 py-1 rounded cursor-pointer hover:bg-red-500"
+                  onClick={() => onDelete()}
+                >
+                  🗑
+                </button>
+              </div>
+            </div>
+          ) : scene.status === "generating" ? (
+            <div className="text-center">
+              <div className="text-lg animate-spin">⏳</div>
+              <div className="text-[8px] text-amber-400 mt-1">Generando...</div>
+            </div>
+          ) : scene.status === "error" ? (
+            <div className="text-center px-2">
+              <div className="text-lg">❌</div>
+              <div className="text-[8px] text-red-400 mt-1 line-clamp-2">{scene.errorMsg || "Error"}</div>
+            </div>
+          ) : (
+            <div className="text-center">
+              <div className="text-lg opacity-30">🎬</div>
+              <div className="text-[8px] text-[var(--text-tertiary)]">Sin video</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Duration (FIXED from timeline) + Description */}
+      <div className="px-3 pb-1">
+        <div className="flex items-center gap-2 mb-0.5">
+          <span className="text-[10px] font-bold text-cyan-400 bg-cyan-400/10 px-2 py-0.5 rounded">
+            ⏱ {scene.duration}s
+          </span>
+          {isVeo && <span className="text-[8px] text-purple-400">Director IA escribe prompt</span>}
+          {!isVeo && scene.model !== "ken-burns" && <span className="text-[8px] text-blue-400">Director IA escribe prompt</span>}
+        </div>
+        <div className="text-[10px] text-[var(--text-tertiary)] line-clamp-2">
+          {sceneData.text_excerpt || sceneData.image_prompt || "Sin descripción"}
+        </div>
+      </div>
+
+      {/* Motion Prompt OR Ken Burns Config */}
+      <div className="px-3 pb-2">
+        {scene.model === "ken-burns" && scene.status === "done" ? (
+          /* ── Ken Burns Done — compact label ── */
+          <div className="text-[9px] text-[var(--text-tertiary)]">🎞 Ken Burns aplicado</div>
+        ) : scene.model === "ken-burns" ? (
+          /* ── Ken Burns Config Panel ── */
+          <div>
+            <label className="text-[9px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
+              🎞 Efecto Ken Burns
+            </label>
+
+            {/* Mode toggle: Standard vs Parallax */}
+            <div className="flex gap-1 mt-1.5">
+              <button
+                onClick={() => onChange({ kbConfig: { ...scene.kbConfig, mode: "standard" } })}
+                disabled={scene.status === "generating" || scene.status === "done"}
+                className={`flex-1 px-2 py-1 text-[9px] rounded-md transition-all ${
+                  scene.kbConfig.mode === "standard"
+                    ? "bg-emerald-600 text-white"
+                    : "bg-[var(--surface-2)] text-[var(--text-tertiary)] hover:text-white"
+                } disabled:opacity-50`}
+              >
+                🎬 Estándar
+              </button>
+              <button
+                onClick={() => onChange({ kbConfig: { ...scene.kbConfig, mode: "parallax" } })}
+                disabled={scene.status === "generating" || scene.status === "done"}
+                className={`flex-1 px-2 py-1 text-[9px] rounded-md transition-all ${
+                  scene.kbConfig.mode === "parallax"
+                    ? "bg-purple-600 text-white"
+                    : "bg-[var(--surface-2)] text-[var(--text-tertiary)] hover:text-white"
+                } disabled:opacity-50`}
+              >
+                🌄 Paralaje 3D
+              </button>
+            </div>
+
+            {/* Overlay selector */}
+            <div className="flex gap-1 mt-1.5 flex-wrap">
+              {KB_OVERLAYS.map((ov) => (
+                <button
+                  key={ov.id}
+                  onClick={() => onChange({ kbConfig: { ...scene.kbConfig, overlay: ov.id } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className={`px-1.5 py-1 text-[8px] rounded-md transition-all ${
+                    scene.kbConfig.overlay === ov.id
+                      ? "bg-cyan-600 text-white ring-1 ring-cyan-400"
+                      : "bg-[var(--surface-2)] text-[var(--text-tertiary)] hover:text-white"
+                  } disabled:opacity-50`}
+                  title={ov.label}
+                >
+                  {ov.emoji} {ov.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Saved presets (user's custom) */}
+            {savedKBPresets.length > 0 && (
+              <div className="mt-1.5 mb-1">
+                <div className="text-[8px] text-amber-400 mb-1">💾 Mis presets:</div>
+                <div className="flex flex-wrap gap-1">
+                  {savedKBPresets.map((p) => (
+                    <button
+                      key={p.name}
+                      onClick={() => onChange({ kbConfig: { ...p.config } })}
+                      className={`group px-2 py-1 text-[9px] rounded-md transition-all relative ${
+                        scene.kbConfig.preset === p.name
+                          ? "bg-amber-600 text-white ring-1 ring-amber-400"
+                          : "bg-[var(--surface-2)] text-[var(--text-tertiary)] hover:bg-[var(--surface-3)] hover:text-white"
+                      }`}
+                      title={`Zoom ${p.config.start_zoom}→${p.config.end_zoom}%`}
+                    >
+                      {p.name}
+                      <span
+                        onClick={(e) => { e.stopPropagation(); onDeleteKBPreset(p.name) }}
+                        className="hidden group-hover:inline ml-1 text-red-400 hover:text-red-300 cursor-pointer"
+                      >✕</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Built-in preset buttons */}
+            <div className="grid grid-cols-4 gap-1 mt-1.5">
+              {KB_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => onChange({ kbConfig: { ...p.config, preset: p.id } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className={`px-1 py-1.5 text-[9px] rounded-md transition-all ${
+                    scene.kbConfig.preset === p.id
+                      ? "bg-emerald-600 text-white ring-1 ring-emerald-400"
+                      : "bg-[var(--surface-2)] text-[var(--text-tertiary)] hover:bg-[var(--surface-3)] hover:text-white"
+                  } disabled:opacity-50`}
+                  title={p.label}
+                >
+                  {p.emoji}
+                </button>
+              ))}
+            </div>
+            {/* Manual sliders */}
+            <div className="mt-2 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-[8px] text-[var(--text-tertiary)] w-14">Zoom Ini</span>
+                <input type="range" min={100} max={150} value={scene.kbConfig.start_zoom}
+                  onChange={(e) => onChange({ kbConfig: { ...scene.kbConfig, preset: null, start_zoom: +e.target.value } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className="flex-1 h-1 accent-emerald-500" />
+                <span className="text-[9px] text-white w-8 text-right">{scene.kbConfig.start_zoom}%</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[8px] text-[var(--text-tertiary)] w-14">Zoom Fin</span>
+                <input type="range" min={100} max={150} value={scene.kbConfig.end_zoom}
+                  onChange={(e) => onChange({ kbConfig: { ...scene.kbConfig, preset: null, end_zoom: +e.target.value } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className="flex-1 h-1 accent-emerald-500" />
+                <span className="text-[9px] text-white w-8 text-right">{scene.kbConfig.end_zoom}%</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[8px] text-[var(--text-tertiary)] w-14">Pos X</span>
+                <input type="range" min={0} max={100} value={scene.kbConfig.start_x}
+                  onChange={(e) => onChange({ kbConfig: { ...scene.kbConfig, preset: null, start_x: +e.target.value } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className="flex-1 h-1 accent-blue-500" />
+                <span className="text-[8px] text-[var(--text-tertiary)]">→</span>
+                <input type="range" min={0} max={100} value={scene.kbConfig.end_x}
+                  onChange={(e) => onChange({ kbConfig: { ...scene.kbConfig, preset: null, end_x: +e.target.value } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className="flex-1 h-1 accent-blue-500" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[8px] text-[var(--text-tertiary)] w-14">Pos Y</span>
+                <input type="range" min={0} max={100} value={scene.kbConfig.start_y}
+                  onChange={(e) => onChange({ kbConfig: { ...scene.kbConfig, preset: null, start_y: +e.target.value } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className="flex-1 h-1 accent-blue-500" />
+                <span className="text-[8px] text-[var(--text-tertiary)]">→</span>
+                <input type="range" min={0} max={100} value={scene.kbConfig.end_y}
+                  onChange={(e) => onChange({ kbConfig: { ...scene.kbConfig, preset: null, end_y: +e.target.value } })}
+                  disabled={scene.status === "generating" || scene.status === "done"}
+                  className="flex-1 h-1 accent-blue-500" />
+              </div>
+            </div>
+
+            {/* Save & Apply buttons */}
+            <div className="flex gap-1.5 mt-2">
+              <button
+                onClick={() => {
+                  const name = prompt("Nombre del preset:")
+                  if (name && name.trim()) onSaveKBPreset(name.trim(), scene.kbConfig)
+                }}
+                disabled={scene.status === "generating" || scene.status === "done"}
+                className="flex-1 px-2 py-1.5 text-[9px] font-medium text-amber-300 bg-amber-600/20 hover:bg-amber-600/40 border border-amber-600/40 rounded-md transition-colors disabled:opacity-50"
+              >
+                💾 Guardar preset
+              </button>
+              <button
+                onClick={() => onApplyKBToAll(scene.kbConfig)}
+                disabled={scene.status === "generating" || scene.status === "done"}
+                className="flex-1 px-2 py-1.5 text-[9px] font-medium text-emerald-300 bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-600/40 rounded-md transition-colors disabled:opacity-50"
+              >
+                📋 Aplicar a todos
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* ── Regular Motion Prompt ── */
+          <div>
+            <div className="flex items-center justify-between">
+              <label className="text-[9px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
+                Motion Prompt {hasPrompt ? "✅" : ""}
+              </label>
+              <button
+                onClick={() => onAutoPrompt(scene.index)}
+                disabled={scene.status === "generating"}
+                title="Reescribir SOLO el prompt de esta escena con el director (no toca las demás)"
+                className="px-1.5 py-0.5 text-[9px] font-medium text-indigo-300 bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-600/40 rounded transition-colors disabled:opacity-50"
+              >
+                🤖 Auto-prompt
+              </button>
+            </div>
+            <textarea
+              value={scene.motionPrompt}
+              onChange={(e) => onChange({ motionPrompt: e.target.value })}
+              placeholder={isVeo ? "El director IA escribirá el prompt..." : "El director IA escribirá el prompt al auto-preparar..."}
+              rows={2}
+              disabled={scene.status === "generating" || scene.status === "done"}
+              className="w-full mt-1 px-2 py-1.5 text-[11px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded-lg text-white placeholder:text-[var(--text-tertiary)] resize-none focus:border-indigo-500/50 focus:outline-none disabled:opacity-50"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Controls: Model + Resolution (NO duration — it's fixed) */}
+      <div className="px-3 pb-2 flex gap-1.5">
+        <select
+          value={scene.model}
+          onChange={(e) => {
+            // Si la escena está en 480p y el nuevo modelo NO la vende, degradar a 720p
+            // para que nunca viaje una resolución inválida al backend.
+            const nm = e.target.value
+            const patch: Partial<SceneState> = { model: nm }
+            if (scene.resolution === "480p" && !MODEL_MAP[nm]?.price480) patch.resolution = "720p"
+            onChange(patch)
+          }}
+          disabled={scene.status === "generating" || scene.status === "done"}
+          className="flex-1 px-1.5 py-1 text-[10px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded text-white disabled:opacity-50"
+        >
+          {MODELS.map((m) => {
+            // Sora redondea al escalón + cola de sostenimiento: cualquier duración
+            // hasta su máximo es válida — sin ⚠️ (solo confundía).
+            const isCompatible =
+              m.id === "ken-burns" ||
+              (m.id.startsWith("sora")
+                ? scene.duration <= m.durations[m.durations.length - 1]
+                : m.durations.includes(scene.duration))
+            return (
+              <option key={m.id} value={m.id}>
+                {m.emoji} {m.name} ({m.tier}){!isCompatible ? " ⚠️" : ""}
+              </option>
+            )
+          })}
+        </select>
+
+        <select
+          value={scene.resolution}
+          onChange={(e) => onChange({ resolution: e.target.value as Resolution })}
+          disabled={scene.status === "generating" || scene.status === "done"}
+          className="w-16 px-1 py-1 text-[10px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded text-white text-center disabled:opacity-50"
+        >
+          {MODEL_MAP[scene.model]?.price480 !== undefined && <option value="480p">480p</option>}
+          <option value="720p">720p</option>
+          <option value="1080p">1080p</option>
+        </select>
+      </div>
+
+      {/* Volume Control */}
+      <div className="px-3 pb-1 flex items-center gap-2">
+        <span className="text-[8px] text-[var(--text-tertiary)] w-6">🔊</span>
+        <input
+          type="range"
+          min={0}
+          max={200}
+          value={scene.volume}
+          onChange={(e) => onChange({ volume: Number(e.target.value) })}
+          className="flex-1 h-1 accent-emerald-500"
+          title={`Volumen: ${scene.volume}%`}
+        />
+        <span className="text-[8px] text-[var(--text-tertiary)] w-8 text-right">{scene.volume}%</span>
+      </div>
+
+      {/* Bottom: Cost + Generate/Cancel */}
+      <div className="px-3 pb-3 flex items-center justify-between">
+        <span className={`text-xs font-bold ${cost === 0 ? "text-green-400" : cost < 1 ? "text-blue-400" : "text-amber-400"}`}>
+          ${cost.toFixed(3)}
+        </span>
+
+        {scene.status === "pending" || scene.status === "ready" || scene.status === "error" ? (
+          <button
+            onClick={onGenerate}
+            className="px-3 py-1 text-[10px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors"
+          >
+            ▶ Generar
+          </button>
+        ) : scene.status === "done" ? (
+          <span className="text-[10px] text-green-400 font-medium">✅ Listo</span>
+        ) : (
+          <button
+            onClick={onCancel}
+            className="px-2 py-1 text-[9px] font-medium text-red-400 border border-red-800 hover:bg-red-900/30 rounded-lg transition-colors"
+          >
+            ✕ Cancelar
+          </button>
+        )}
+        <button
+          onClick={onOmniTest}
+          title="Prueba aislada con Gemini Omni Flash (no toca el flujo normal)"
+          className="px-2 py-1 text-[9px] font-medium text-purple-300 border border-purple-700 hover:bg-purple-900/30 rounded-lg transition-colors"
+        >
+          🧪 Omni
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/* ── Main Production Panel (Fullscreen) ── */
+export const ProductionPanel = memo(function ProductionPanel({
+  isOpen,
+  onClose,
+  chapterData,
+  chapterId,
+  onVideoGenerated,
+}: ProductionPanelProps) {
+  const [scenes, setScenes] = useState<SceneState[]>([])
+  const [directorStatus, setDirectorStatus] = useState<any>(null)   // 🎥 Director de Video (Muse)
+  const [directorBusy, setDirectorBusy] = useState(false)
+
+  const directorStart = async () => {
+    if (!confirm("🎥 Director de Video (Muse): dirigirá y generará TODAS las escenas pendientes EN CADENA, viendo cada video terminado antes de dirigir el siguiente. Cada escena se cobra al generarse. ¿Arrancar?")) return
+    setDirectorBusy(true)
+    try {
+      const r = await apiFetch(`/api/storyboard/chapters/${chapterId}/video-director/start`, {
+        method: "POST", body: JSON.stringify({ model: globalModel || "pruna-video-draft", resolution: globalResolution }) })
+      setStatusMsg(`🎥 Director en marcha — arranca en E${r.starts_at_scene}/${r.total_scenes}`)
+    } catch (e: any) { setStatusMsg(`❌ ${e.message || "Error al arrancar el director"}`) }
+    finally { setDirectorBusy(false) }
+  }
+  const directorContinue = async (skip = false) => {
+    setDirectorBusy(true)
+    try {
+      const r = await apiFetch(`/api/storyboard/chapters/${chapterId}/video-director/continue`, {
+        method: "POST", body: JSON.stringify(skip ? { skip_scene: true, model: globalModel } : { model: globalModel }) })
+      setStatusMsg(`▶ Director continúa en E${r.resumes_at_scene}`)
+    } catch (e: any) { setStatusMsg(`❌ ${e.message}`) }
+    finally { setDirectorBusy(false) }
+  }
+  const directorStop = async () => {
+    if (!confirm("¿Detener al Director de Video? Lo hecho queda; podrás reanudarlo después con Continuar.")) return
+    try { await apiFetch(`/api/storyboard/chapters/${chapterId}/video-director/stop`, { method: "POST", body: "{}" }) ; setStatusMsg("⏹ Director detenido") } catch {}
+  }
+  const [masterVol, setMasterVol] = useState<number>(10)   // volumen maestro del audio de TODOS los videos (%)
+  const [narrationVol, setNarrationVol] = useState<number>(100)   // volumen de la narración (voz) (%)
+  const [globalModel, setGlobalModel] = useState("ken-burns")
+  const [globalResolution, setGlobalResolution] = useState<Resolution>("720p")
+  const [activeTier, setActiveTier] = useState<TierName | "manual" | null>(null)
+  const [isAutoPreparing, setIsAutoPreparing] = useState(false)
+  const [isBatchGenerating, setIsBatchGenerating] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [exportUrl, setExportUrl] = useState<string | null>(null)
+  const [isBrowserExportOpen, setIsBrowserExportOpen] = useState(false)
+  const [statusMsg, setStatusMsg] = useState("")
+  const pollingRef = useRef<NodeJS.Timeout | null>(null)
+  const exportPollRef = useRef<NodeJS.Timeout | null>(null)
+  const mountedRef = useRef(true)
+
+  // ── Saved Ken Burns Presets (localStorage) ──
+  const KB_STORAGE_KEY = "zentrix_kb_presets"
+  const [savedKBPresets, setSavedKBPresets] = useState<{ name: string; config: KBConfig }[]>(() => {
+    try {
+      const raw = typeof window !== "undefined" ? localStorage.getItem(KB_STORAGE_KEY) : null
+      return raw ? JSON.parse(raw) : []
+    } catch { return [] }
   })
 
-  // Generation handler
-  const handleGenerate = useCallback(
-    async (prompt: string, aspectRatio: string, type: "video" | "image" = "video", model?: string, image?: string) => {
-      const newId = Math.random().toString(36).substr(2, 9)
-      const tempMedia: MediaItem = {
-        id: newId,
-        url: "",
-        prompt: prompt,
-        duration: type === "video" ? defaultDuration : 5,
-        aspectRatio: aspectRatio,
-        status: "generating",
-        type: type,
-        resolution: { width: 1280, height: 720 },
-      }
-      timeline.setMedia((prev) => [tempMedia, ...prev])
-      setIsGenerating(true)
+  const saveKBPreset = useCallback((name: string, config: KBConfig) => {
+    setSavedKBPresets((prev) => {
+      const updated = [...prev.filter((p) => p.name !== name), { name, config: { ...config, preset: name } }]
+      localStorage.setItem(KB_STORAGE_KEY, JSON.stringify(updated))
+      setStatusMsg(`💾 Preset "${name}" guardado`)
+      return updated
+    })
+  }, [])
 
+  const deleteKBPreset = useCallback((name: string) => {
+    setSavedKBPresets((prev) => {
+      const updated = prev.filter((p) => p.name !== name)
+      localStorage.setItem(KB_STORAGE_KEY, JSON.stringify(updated))
+      setStatusMsg(`🗑 Preset "${name}" eliminado`)
+      return updated
+    })
+  }, [])
+
+  const applyKBToAll = useCallback((config: KBConfig) => {
+    let count = 0
+    setScenes((prev) =>
+      prev.map((s) => {
+        if (s.model !== "ken-burns" || s.status === "done" || s.status === "generating") return s
+        count++
+        return { ...s, kbConfig: { ...config } }
+      })
+    )
+    const label = config.preset || "manual"
+    setStatusMsg(`🎞 Ken Burns "${label}" aplicado a ${count} escenas`)
+  }, [])
+
+  // ── Scene State Persistence (localStorage per chapter + firma de contenido) ──
+  // La firma incluye nº de escenas + inicio del texto de la 1ª escena. Si el contenido del
+  // capítulo cambia (o es otro capítulo), la llave cambia y NO se cargan datos viejos/envenenados.
+  const contentSig = chapterData
+    ? `${chapterData.scenes?.length || 0}_${(chapterData.scenes?.[0]?.text_excerpt || "").slice(0, 24).replace(/\s/g, "")}`
+    : ""
+  const SCENE_STORAGE_KEY = chapterId ? `zentrix_prod_scenes_${chapterId}_${contentSig}` : ""
+
+  const saveScenesToStorage = useCallback((scenesToSave: SceneState[]) => {
+    if (!SCENE_STORAGE_KEY) return
+    const toSave = scenesToSave.map((s) => ({
+      index: s.index, model: s.model, resolution: s.resolution,
+      motionPrompt: s.motionPrompt, classification: s.classification,
+      kbConfig: s.kbConfig, status: s.status, videoUrl: s.videoUrl,
+      volume: s.volume, jobId: s.jobId,
+    }))
+    try {
+      localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(toSave))
+    } catch {
+      // AUTOCURACIÓN (11-ago-2026): con el almacenamiento LLENO (la clave gigante
+      // legada del capítulo, u hojas de escenas de capítulos viejos), este guardado
+      // fallaba EN SILENCIO → cualquier refresco re-inicializaba las escenas y TODAS
+      // volvían al modelo por defecto (Draft) — el usuario elegía Pruna normal y el
+      // sistema generaba Draft "como quiso". Ahora: liberar espacio y reintentar.
       try {
-        let videoUrl = ""
+        localStorage.removeItem("zentrix_loaded_chapter_data")
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const k = localStorage.key(i)
+          if (k && k.startsWith("zentrix_prod_scenes_") && k !== SCENE_STORAGE_KEY) {
+            localStorage.removeItem(k)
+          }
+        }
+        localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(toSave))
+        console.warn("[Zentrix] Almacenamiento liberado y selecciones guardadas (autocuración)")
+      } catch (e2) {
+        console.error("[Zentrix] No se pudieron guardar las selecciones de escenas:", e2)
+      }
+    }
+  }, [SCENE_STORAGE_KEY])
 
-        if (type === "video") {
-          const response = await fetch("/api/seq/generate-video", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ prompt, aspectRatio, model, imageUrl: image }),
+  // Initialize scenes — duration FIXED from timeline + restore saved state
+  useEffect(() => {
+    if (!chapterData) return
+
+    // Load saved state from localStorage
+    let savedMap: Record<number, any> = {}
+    try {
+      const raw = SCENE_STORAGE_KEY ? localStorage.getItem(SCENE_STORAGE_KEY) : null
+      if (raw) {
+        const arr = JSON.parse(raw)
+        savedMap = Object.fromEntries(arr.map((s: any) => [s.index, s]))
+      }
+    } catch {}
+
+    const initial: SceneState[] = chapterData.scenes
+      .filter((s) => s.image_url || s.video_url)
+      .map((s) => {
+        const rawDuration = (s.end_time !== null && s.start_time !== null)
+          ? Math.round(s.end_time - s.start_time)
+          : 8
+        const duration = snapToStandardDuration(rawDuration)
+        const compatible = getCompatibleModels(duration)
+        const defaultModel = compatible.find((m) => m.id === "pruna-video-draft") ? "pruna-video-draft" : compatible.find((m) => m.id === "ken-burns") ? "ken-burns" : compatible[0]?.id || "ken-burns"
+
+        // Restore saved config if available
+        const saved = savedMap[s.index]
+
+        // Determine model: if saved as ken-burns but no KB video exists, switch to PrunaAI Draft
+        let model = saved?.model || (s.video_url ? (s.video_model || defaultModel) : defaultModel)
+        if (model === "ken-burns" && !s.video_url && !(saved?.status === "done" && saved?.videoUrl)) {
+          model = defaultModel // pruna-video-draft
+        }
+
+        return {
+          index: s.index,
+          model,
+          duration,
+          // 480p guardado solo revive si el modelo (posiblemente cambiado arriba) la vende
+          resolution: ((): Resolution => {
+            const r = (saved?.resolution || "720p") as Resolution
+            return r === "480p" && MODEL_MAP[model]?.price480 === undefined ? "720p" : r
+          })(),
+          motionPrompt: saved?.motionPrompt || "",
+          classification: saved?.classification || "",
+          kbConfig: saved?.kbConfig || { ...KB_DEFAULT },
+          status: s.video_url ? "done" as const : "pending" as const,
+          videoUrl: s.video_url || null,
+          errorMsg: "",
+          volume: saved?.volume ?? 10,
+          jobId: saved?.jobId || null,
+        }
+      })
+    setScenes(initial)
+
+    // Fetch video-progress to detect completed videos not in chapterData
+    if (chapterId) {
+      apiFetch(`/api/storyboard/chapters/${chapterId}/video-director/status`).then((d) => {
+        setDirectorStatus(d && d.status ? d : null)
+      }).catch(() => {})
+      apiFetch(`/api/image-studio/chapters/${chapterId}/video-progress`).then((data) => {
+        if (!data.videos || !mountedRef.current) return
+        setScenes((prev) => {
+          let changed = false
+          const updated = prev.map((s) => {
+            if (s.status === "done" && s.videoUrl) return s
+            const vid = data.videos.find((v: any) => v.segment_index === s.index)
+            if (!vid) return s
+            const isKB = s.model === "ken-burns"
+            const status = isKB ? vid.kb_status : vid.veo_status
+            const url = isKB ? vid.kb_url : vid.veo_url
+            if (status === "done" && url) {
+              changed = true
+              onVideoGenerated(s.index, url)
+              return { ...s, status: "done" as const, videoUrl: url }
+            }
+            return s
           })
-
-          if (!response.ok) {
-            const err = await response.json()
-            throw new Error(err.error || "Generation failed")
-          }
-
-          const result = await response.json()
-          setGeneratedItem({ url: result.url, type: "video" })
-          videoUrl = result.url
-        } else {
-          // Image Generation
-          let apiAspectRatio = "square"
-          if (aspectRatio === "16:9") apiAspectRatio = "landscape"
-          else if (aspectRatio === "9:16") apiAspectRatio = "portrait"
-
-          const formData = new FormData()
-          if (image) {
-            formData.append("mode", "image-editing")
-            formData.append("image1Url", image)
-          } else {
-            formData.append("mode", "text-to-image")
-          }
-          formData.append("prompt", prompt)
-          formData.append("aspectRatio", apiAspectRatio)
-          if (model) formData.append("model", model)
-
-          const response = await fetch("/api/seq/generate-image", { method: "POST", body: formData })
-
-          if (!response.ok) {
-            const err = await response.json()
-            throw new Error(err.error || "Image generation failed")
-          }
-
-          const result = await response.json()
-          setGeneratedItem({ url: result.url, type: "image" })
-          videoUrl = result.url
-        }
-
-        if (!videoUrl) throw new Error("No URL received")
-
-        if (isMountedRef.current) {
-          timeline.setMedia((prev) => prev.map((m) => (m.id === newId ? { ...m, url: videoUrl, status: "ready" } : m)))
-          setActiveView("library")
-
-          if (videoUrl) {
-            const readyItem = { ...tempMedia, url: videoUrl, status: "ready" as const }
-            timeline.handleAddToTimeline(readyItem)
-          }
-        }
-      } catch (error: unknown) {
-        if (isMountedRef.current) {
-          timeline.setMedia((prev) => prev.map((m) => (m.id === newId ? { ...m, status: "error" } : m)))
-          const message = error instanceof Error ? error.message : "Generation failed"
-          alert(message)
-        }
-      } finally {
-        if (isMountedRef.current) setIsGenerating(false)
-      }
-    },
-    [defaultDuration, timeline],
-  )
-
-  // Import handler
-
-  const handleImport = mediaManagement.handleImport
-
-  // Export handlers — server-side via backend (bypasses CORS)
-  const startExport = useCallback(
-    async (resolution: "720p" | "1080p", _source: "all" | "selection") => {
-      if (!loadedChapterId) {
-        alert("No hay capítulo cargado. Carga un capítulo desde Zentrix primero.")
-        return
-      }
-
-      const token = typeof window !== "undefined" ? localStorage.getItem("zentrix_token") : null
-      if (!token) {
-        alert("No estás autenticado en Zentrix. Inicia sesión en el panel Zentrix primero.")
-        return
-      }
-
-      const EXPORT_BACKEND =
-        typeof window !== "undefined" && window.location.hostname === "localhost"
-          ? "http://localhost:8000"
-          : "https://zentrix-backend-mcvk.onrender.com"
-
-      ffmpeg.exportCancelledRef.current = false
-      ffmpeg.setIsExporting(true)
-      ffmpeg.setDownloadUrl(null)
-      ffmpeg.setExportProgress(0)
-      ffmpeg.setExportPhase("init")
-      playback.setIsPlaying(false)
-
-      try {
-        // Step 1: Create export job on server
-        ffmpeg.setExportProgress(5)
-
-        const createRes = await fetch(
-          `${EXPORT_BACKEND}/api/image-studio/chapters/${loadedChapterId}/export-chapter`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ resolution }),
-          },
-        )
-        const createData = await createRes.json()
-        if (!createRes.ok) throw new Error(createData.detail || "Error al crear exportación")
-
-        const jobId = createData.export_job_id
-        ffmpeg.setExportProgress(10)
-        ffmpeg.setExportPhase("encoding")
-
-        // Step 2: Poll status until done
-        const maxAttempts = 720 // ~60 min max (5s × 720)
-        let attempts = 0
-
-        while (attempts < maxAttempts) {
-          if (ffmpeg.exportCancelledRef.current) throw new Error("Export cancelled")
-
-          await new Promise((r) => setTimeout(r, 5000))
-
-          const statusRes = await fetch(
-            `${EXPORT_BACKEND}/api/image-studio/chapters/${loadedChapterId}/export-status/${jobId}`,
-            { headers: { Authorization: `Bearer ${token}` } },
-          )
-          const status = await statusRes.json()
-
-          if (status.status === "done" && status.download_url) {
-            ffmpeg.setExportPhase("complete")
-            ffmpeg.setExportProgress(100)
-            ffmpeg.setDownloadUrl(status.download_url)
-            return
-          } else if (status.status === "error") {
-            throw new Error(status.error || "Error en la exportación del servidor")
-          }
-
-          // Estimate progress (linear ramp to 90%)
-          attempts++
-          ffmpeg.setExportProgress(Math.min(90, 10 + Math.round((attempts / 60) * 80)))
-        }
-
-        throw new Error("La exportación tardó demasiado. Revisa el estado en el Panel de Producción.")
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : ""
-        if (msg !== "Export cancelled") {
-          console.error("Export Failed", err)
-          alert(`Exportación fallida: ${msg || "Error desconocido"}`)
-        }
-      } finally {
-        ffmpeg.setIsExporting(false)
-        ffmpeg.setExportPhase("idle")
-      }
-    },
-    [ffmpeg, playback, loadedChapterId],
-  )
-
-  const handleCancelExport = useCallback(() => {
-    ffmpeg.exportCancelledRef.current = true
-    ffmpeg.setIsExporting(false)
-    setIsExportModalOpen(false)
-    ffmpeg.setExportPhase("idle")
-  }, [ffmpeg])
-
-  // Render preview handler
-  const handleRenderPreview = useCallback(async () => {
-    ffmpeg.renderCancelledRef.current = false
-
-    if (!ffmpeg.ffmpegLoaded || !ffmpeg.ffmpegRef.current) {
-      try {
-        await ffmpeg.loadFFmpeg()
-      } catch (e) {
-        alert("Failed to load render engine. Please try again.")
-        return
-      }
-    }
-
-    ffmpeg.setIsRendering(true)
-    ffmpeg.setRenderProgress(0)
-    playback.setIsPlaying(false)
-
-    if (ffmpeg.renderedPreviewUrl) {
-      URL.revokeObjectURL(ffmpeg.renderedPreviewUrl)
-      ffmpeg.setRenderedPreviewUrl(null)
-    }
-
-    const contentDuration = timeline.contentDuration
-    if (contentDuration <= 0) {
-      alert("No content to render.")
-      ffmpeg.setIsRendering(false)
-      return
-    }
-
-    const ffmpegInstance = ffmpeg.ffmpegRef.current!
-
-    try {
-      // Audio render
-      const sampleRate = FFMPEG_CONSTANTS.AUDIO_SAMPLE_RATE
-      const totalFrames = Math.ceil(contentDuration * sampleRate)
-      // Find the webkitOfflineAudioContext usages and replace with typed version
-      const OfflineCtx = window.OfflineAudioContext || (window as WebkitWindow).webkitOfflineAudioContext
-      if (!OfflineCtx) {
-        alert("Web Audio API OfflineAudioContext not supported.")
-        ffmpeg.setIsRendering(false)
-        return
-      }
-      const offlineCtx = new OfflineCtx(2, totalFrames, sampleRate)
-      const audioBufferMap = new Map<string, AudioBuffer>()
-
-      ffmpeg.setRenderProgress(5)
-
-      for (const mid of new Set(
-        timeline.timelineClips.filter((c) => c.trackId.startsWith("a") || !c.isAudioDetached).map((c) => c.mediaId),
-      )) {
-        if (ffmpeg.renderCancelledRef.current) throw new Error("Render cancelled")
-        const item = timeline.mediaMap[mid]
-        if (item?.url) {
-          try {
-            const response = await fetch(item.url)
-            const arrayBuffer = await response.arrayBuffer()
-            audioBufferMap.set(mid, await offlineCtx.decodeAudioData(arrayBuffer))
-          } catch (e) { }
-        }
-      }
-
-      ffmpeg.setRenderProgress(15)
-
-      timeline.timelineClips.forEach((clip) => {
-        if (ffmpeg.renderCancelledRef.current) return
-        const track = timeline.tracks.find((t) => t.id === clip.trackId)
-        if (track?.isMuted) return
-        if (track?.type === "video" && clip.isAudioDetached) return
-
-        const buffer = audioBufferMap.get(clip.mediaId)
-        if (buffer) {
-          const source = offlineCtx.createBufferSource()
-          source.buffer = buffer
-          const gainNode = offlineCtx.createGain()
-          source.connect(gainNode)
-          gainNode.connect(offlineCtx.destination)
-          source.start(clip.start, clip.offset, clip.duration)
-        }
-      })
-
-      if (ffmpeg.renderCancelledRef.current) throw new Error("Render cancelled")
-      const renderedBuffer = await offlineCtx.startRendering()
-      await ffmpegInstance.writeFile("preview_audio.wav", new Uint8Array(audioBufferToWav(renderedBuffer)))
-
-      ffmpeg.setRenderProgress(25)
-
-      // Video render
-      let isVertical = false
-      const firstClip = timeline.timelineClips.sort((a, b) => a.start - b.start)[0]
-      if (firstClip) {
-        const m = timeline.mediaMap[firstClip.mediaId]
-        if (m?.resolution && m.resolution.height > m.resolution.width) isVertical = true
-      }
-
-      let targetW = 1280,
-        targetH = 720
-      if (isVertical) [targetW, targetH] = [targetH, targetW]
-
-      if (playback.canvasRef.current) {
-        playback.canvasRef.current.width = targetW
-        playback.canvasRef.current.height = targetH
-      }
-      const ctx = playback.canvasRef.current!.getContext("2d", { alpha: false })!
-
-      const dt = 1 / 30
-      let exportTime = 0
-      let frameCount = 0
-
-      while (exportTime < contentDuration && !ffmpeg.renderCancelledRef.current) {
-        playback.syncMediaToTime(exportTime, true)
-        await Promise.all([
-          playback.waitForVideoReady(playback.videoRefA.current!),
-          playback.waitForVideoReady(playback.videoRefB.current!),
-        ])
-        playback.drawFrameToCanvas(ctx, targetW, targetH, exportTime)
-
-        const blob: Blob = await new Promise((resolve, reject) => {
-          playback.canvasRef.current!.toBlob(
-            (b) => (b ? resolve(b) : reject(new Error("Canvas toBlob failed"))),
-            "image/jpeg",
-            FFMPEG_CONSTANTS.PREVIEW_JPEG_QUALITY,
-          )
+          if (changed) saveScenesToStorage(updated)
+          return changed ? updated : prev
         })
-
-        const buffer = await blob.arrayBuffer()
-        await ffmpegInstance.writeFile(`pframe${frameCount.toString().padStart(4, "0")}.jpg`, new Uint8Array(buffer))
-        ffmpeg.setRenderProgress(5 + (exportTime / contentDuration) * 65)
-        exportTime += dt
-        frameCount++
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      }
-
-      if (frameCount === 0) throw new Error("No frames were rendered.")
-
-      // Encode
-      ffmpeg.setRenderProgress(92)
-
-      ffmpegInstance.on("progress", ({ progress }) => {
-        ffmpeg.setRenderProgress(92 + Math.round(progress * 8))
-      })
-
-      await ffmpegInstance.exec([
-        "-framerate",
-        "30",
-        "-i",
-        "pframe%04d.jpg",
-        "-i",
-        "preview_audio.wav",
-        "-c:a",
-        "aac",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
-        "-crf",
-        String(FFMPEG_CONSTANTS.PREVIEW_CRF),
-        "-pix_fmt",
-        "yuv420p",
-        "-shortest",
-        "preview.mp4",
-      ])
-
-      const data = (await ffmpegInstance.readFile("preview.mp4")) as any
-      ffmpeg.setRenderedPreviewUrl(URL.createObjectURL(new Blob([data], { type: "video/mp4" })))
-      ffmpeg.setIsPreviewStale(false)
-      ffmpeg.setRenderProgress(100)
-
-      // Cleanup
-      try {
-        await ffmpegInstance.deleteFile("preview_audio.wav")
-      } catch (e) { }
-      try {
-        await ffmpegInstance.deleteFile("preview.mp4")
-      } catch (e) { }
-      for (let i = 0; i < frameCount; i++) {
-        try {
-          await ffmpegInstance.deleteFile(`pframe${i.toString().padStart(4, "0")}.jpg`)
-        } catch (e) { }
-      }
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : ""
-      if (errorMessage !== "Render cancelled") {
-        console.error("Render Failed", err)
-        alert(`Render failed: ${errorMessage || "Unknown error"}`)
-      }
-    } finally {
-      ffmpeg.setIsRendering(false)
+      }).catch(() => {})
     }
-  }, [ffmpeg, playback, timeline])
-
-  const handleCancelRender = useCallback(() => {
-    ffmpeg.renderCancelledRef.current = true
-    ffmpeg.setIsRendering(false)
-    ffmpeg.setRenderProgress(0)
-  }, [ffmpeg])
-
-  // Keyboard shortcuts
-  const handleSaveProject = useCallback(async () => {
-    setIsSaving(true)
-    try {
-      const projectData = await serializeProject(
-        timeline.media,
-        timeline.timelineClips,
-        timeline.tracks,
-        storyboard.panels,
-        videoConfig,
-        storyboard.masterDescription,
-      )
-      await saveProjectToFile(projectData)
-      toastCtx.success("Project saved successfully")
-    } catch (error) {
-      console.error("Save failed:", error)
-      toastCtx.error("Failed to save project")
-    } finally {
-      setIsSaving(false)
-    }
-  }, [
-    timeline.media,
-    timeline.timelineClips,
-    timeline.tracks,
-    storyboard.panels,
-    videoConfig,
-    storyboard.masterDescription,
-    toastCtx,
-  ])
-
-  const handleLoadProject = useCallback(async () => {
-    try {
-      const projectData = await loadProjectFromFile()
-      if (!projectData) return
-
-      const {
-        media,
-        timelineClips,
-        tracks,
-        storyboardPanels: loadedStoryboard,
-        videoConfig: loadedConfig,
-        masterDescription: loadedDescription,
-      } = deserializeProject(projectData)
-
-      timeline.setMedia(media)
-      timeline.setTimelineClips(timelineClips)
-      timeline.setTracks(tracks)
-      storyboard.setPanels(loadedStoryboard)
-      setVideoConfig(loadedConfig)
-      if (loadedDescription) storyboard.setMasterDescription(loadedDescription)
-
-      toastCtx.success(`Loaded project: ${projectData.name}`)
-    } catch (error) {
-      console.error("Load failed:", error)
-      toastCtx.error("Failed to load project")
-    }
-  }, [timeline, storyboard, toastCtx])
-
-  const handleZoomToFit = useCallback(() => {
-    const { timelineClips: clips, setZoomLevel } = timeline
-    if (clips.length === 0) return
-    const maxEnd = Math.max(...clips.map((c) => c.start + c.duration))
-    if (maxEnd <= 0) return
-    // Usar el ancho real disponible de la ventana (menos paneles laterales ~360px)
-    const containerWidth = Math.max(600, (typeof window !== "undefined" ? window.innerWidth : 1200) - 360)
-    // Permitir alejar hasta 0.5 px/s para que quepa incluso un video largo (10+ min)
-    const newZoom = Math.max(0.5, Math.min(200, (containerWidth - 80) / maxEnd))
-    setZoomLevel(newZoom)
-  }, [timeline])
-
-  useEditorKeyboard({
-    onSaveProject: handleSaveProject,
-    onLoadProject: handleLoadProject,
-    onAddMarker: () => setShowAddMarkerDialog(true),
-    onZoomToFit: handleZoomToFit,
-    onSaveFrame: () => { },
-    currentTime: playback.currentTime,
-    previewVideoRef: playback.previewVideoRef as React.RefObject<HTMLVideoElement>,
-    videoRefA: playback.videoRefA as React.RefObject<HTMLVideoElement>,
-    videoRefB: playback.videoRefB as React.RefObject<HTMLVideoElement>,
-    isPreviewPlayback: playback.isPreviewPlayback,
-    toastCtx,
-  })
+  }, [chapterData, chapterId])
 
   useEffect(() => {
-    if (hasAutosave() && !initialMedia?.length && !initialClips?.length) {
-      const loadAutosavedProject = async () => {
-        //const confirmed = window.confirm("An autosaved project was found. Would you like to restore it?")
-        const confirmed = true // Auto-restore without prompt
-        if (confirmed) {
-          const autosaveData = loadAutosave()
-          if (autosaveData) {
-            const {
-              media,
-              timelineClips,
-              tracks,
-              storyboardPanels: loadedStoryboard,
-              videoConfig: loadedConfig,
-              masterDescription: loadedDescription,
-            } = deserializeProject(autosaveData)
-
-            timeline.setMedia(media)
-            timeline.setTimelineClips(timelineClips)
-            timeline.setTracks(tracks)
-            storyboard.setPanels(loadedStoryboard)
-            setVideoConfig(loadedConfig)
-            if (loadedDescription) storyboard.setMasterDescription(loadedDescription)
-
-            toastCtx.info("Restored autosaved project")
-          }
-        } else {
-          clearAutosave()
-        }
-      }
-      loadAutosavedProject()
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const autosaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  useEffect(() => {
-    if (timeline.timelineClips.length === 0 && timeline.media.length === 0) return
-
-    if (autosaveTimeoutRef.current) {
-      clearTimeout(autosaveTimeoutRef.current)
-    }
-
-    autosaveTimeoutRef.current = setTimeout(() => {
-      autosaveProject(
-        timeline.media,
-        timeline.timelineClips,
-        timeline.tracks,
-        storyboard.panels,
-        videoConfig,
-        storyboard.masterDescription,
-      )
-    }, AUTOSAVE_CONSTANTS.DEBOUNCE_MS) // Autosave after 5 seconds of inactivity
-
+    mountedRef.current = true
     return () => {
-      if (autosaveTimeoutRef.current) {
-        clearTimeout(autosaveTimeoutRef.current)
-      }
+      mountedRef.current = false
+      if (pollingRef.current) clearInterval(pollingRef.current)
+      if (exportPollRef.current) clearInterval(exportPollRef.current)
     }
-  }, [
-    timeline.media,
-    timeline.timelineClips,
-    timeline.tracks,
-    storyboard.panels,
-    videoConfig,
-    storyboard.masterDescription,
-  ])
-
-  const handleLoadDemo = useCallback(() => {
-    const hasExistingContent =
-      timeline.media.length > 0 || timeline.timelineClips.length > 0 || storyboard.panels.length > 0
-
-    if (hasExistingContent) {
-      const confirmed = window.confirm("Loading the demo project will replace your current work. Continue?")
-      if (!confirmed) return
-    }
-
-    const demoData = createDemoData()
-
-    timeline.setMedia(demoData.initialMedia)
-    timeline.setTimelineClips(demoData.initialClips)
-    storyboard.setPanels(demoData.initialStoryboard)
-
-    // Clear autosave since we're loading demo
-    clearAutosave()
-
-    toastCtx.success("Demo project loaded!")
-  }, [timeline, storyboard, toastCtx])
-
-  // View change handler
-  const handleViewChange = useCallback((view: SidebarView) => {
-    setActiveView(view)
-    setIsPanelOpen(true)
   }, [])
 
-  const handleAddMarker = useCallback((marker: Omit<Marker, "id">) => {
-    const newMarker: Marker = {
-      ...marker,
-      id: `marker-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+  // Auto-save scene state to localStorage on every change
+  useEffect(() => {
+    if (scenes.length > 0) saveScenesToStorage(scenes)
+  }, [scenes, saveScenesToStorage])
+
+  // Apply global model + resolution to compatible scenes only
+  const applyGlobalToAll = useCallback(() => {
+    setScenes((prev) =>
+      prev.map((s) => {
+        if (s.status === "done" || s.status === "generating") return s
+        // Only apply if the global model supports this scene's duration
+        const compatible = getCompatibleModels(s.duration)
+        const canUseGlobal = compatible.some((m) => m.id === globalModel)
+        const appliedModel = canUseGlobal ? globalModel : s.model
+        // 480p solo si el modelo APLICADO la vende; si no, esa escena baja a 720p
+        const appliedRes: Resolution =
+          globalResolution === "480p" && MODEL_MAP[appliedModel]?.price480 === undefined
+            ? "720p" : globalResolution
+        return {
+          ...s,
+          model: appliedModel,
+          resolution: appliedRes,
+        }
+      })
+    )
+    // Tell user how many were updated
+    const total = scenes.filter((s) => s.status !== "done" && s.status !== "generating").length
+    const compatible = scenes.filter((s) => {
+      if (s.status === "done" || s.status === "generating") return false
+      return getCompatibleModels(s.duration).some((m) => m.id === globalModel)
+    }).length
+    if (compatible < total) {
+      setStatusMsg(`✅ ${compatible}/${total} escenas actualizadas. ${total - compatible} no son compatibles con ${MODEL_MAP[globalModel]?.name || globalModel} por su duración.`)
+    } else {
+      setStatusMsg(`✅ ${compatible} escenas actualizadas a ${MODEL_MAP[globalModel]?.name || globalModel} ${globalResolution}`)
     }
-    setMarkers((prev) => [...prev, newMarker].sort((a, b) => a.time - b.time))
-  }, [])
+  }, [globalModel, globalResolution, scenes])
 
-  const handleMarkerClick = useCallback(
-    (marker: Marker) => {
-      playback.handleSeek(marker.time) // Use playback.handleSeek to update currentTime
-    },
-    [playback.handleSeek],
-  ) // Depend on playback.handleSeek
+  // Apply tier preset — auto-assigns best model per scene duration
+  const applyTier = useCallback((tier: TierName) => {
+    const config = TIER_CONFIG[tier]
+    let updated = 0
+    setScenes((prev) =>
+      prev.map((s) => {
+        if (s.status === "done" || s.status === "generating") return s
+        const modelId = config.mapping[s.duration]
+        if (!modelId) return s
+        // Verify the model actually supports this duration
+        const model = MODEL_MAP[modelId]
+        if (!model || !model.durations.includes(s.duration)) return s
+        updated++
+        const tierRes: Resolution =
+          globalResolution === "480p" && model.price480 === undefined ? "720p" : globalResolution
+        return { ...s, model: modelId, resolution: tierRes }
+      })
+    )
+    setActiveTier(tier)
+    const tierLabel = config.emoji + " " + config.label
+    const totalScenes = scenes.filter((s) => s.status !== "done" && s.status !== "generating").length
+    setStatusMsg(`${tierLabel}: ${updated}/${totalScenes} escenas asignadas automáticamente`)
+  }, [globalResolution, scenes])
 
-  const handleMarkerDelete = useCallback((markerId: string) => {
-    setMarkers((prev) => prev.filter((m) => m.id !== markerId))
-  }, [])
-
-  const handleMarkerUpdate = useCallback((markerId: string, changes: Partial<Marker>) => {
-    setMarkers((prev) =>
-      prev.map((m) => (m.id === markerId ? { ...m, ...changes } : m)).sort((a, b) => a.time - b.time),
+  const updateScene = useCallback((index: number, updates: Partial<SceneState>) => {
+    setScenes((prev) =>
+      prev.map((s) => (s.index === index ? { ...s, ...updates } : s))
     )
   }, [])
 
-  useEffect(() => {
-    return () => {
-      mediaManagement.cleanup()
+  /* ── Auto-prompt de UNA escena: reescribe solo ese prompt (no toca las demás) ── */
+  const handleAutoPromptScene = useCallback(async (sceneIndex: number) => {
+    if (!chapterId) return
+    setScenes((prev) => prev.map((s) => (s.index === sceneIndex && s.status !== "generating" ? { ...s, status: "pending" as const } : s)))
+    setStatusMsg(`🤖 Reescribiendo el prompt de la escena ${sceneIndex + 1}...`)
+    try {
+      const result = await apiFetch(
+        `/api/image-studio/chapters/${chapterId}/auto-prepare-videos`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            scene_indices: [sceneIndex],
+            default_resolution: globalResolution,
+            default_model: scenes.find((s) => s.index === sceneIndex)?.model || globalModel,
+            // Si la escena YA tenía prompt, el director rueda una SEGUNDA TOMA
+            // (mismo beat y continuidad, distinta forma de animarla)
+            previous_prompts: {
+              [sceneIndex]: scenes.find((s) => s.index === sceneIndex)?.motionPrompt || "",
+            },
+          }),
+        }
+      )
+      if (!mountedRef.current) return
+      const prepared = (result.scenes || []).find((r: any) => r.index === sceneIndex && !r.skipped)
+      if (prepared) {
+        setScenes((prev) =>
+          prev.map((s) =>
+            s.index === sceneIndex
+              ? { ...s, motionPrompt: prepared.motion_prompt || s.motionPrompt, classification: prepared.scene_type || s.classification, status: "ready" as const }
+              : s
+          )
+        )
+        setStatusMsg(`✅ Prompt de la escena ${sceneIndex + 1} reescrito.`)
+      } else {
+        setScenes((prev) => prev.map((s) => (s.index === sceneIndex ? { ...s, status: s.motionPrompt ? ("ready" as const) : ("pending" as const) } : s)))
+        setStatusMsg(`⚠️ No se pudo preparar la escena ${sceneIndex + 1} (¿tiene imagen generada?)`)
+      }
+    } catch (e: unknown) {
+      if (!mountedRef.current) return
+      setScenes((prev) => prev.map((s) => (s.index === sceneIndex ? { ...s, status: s.motionPrompt ? ("ready" as const) : ("pending" as const) } : s)))
+      setStatusMsg(`❌ Error: ${e instanceof Error ? e.message : "Error desconocido"}`)
     }
-  }, [mediaManagement])
+  }, [chapterId, globalResolution, scenes, globalModel])
 
-  // Project Name State
-  const [projectName, setProjectName] = useState<string>("Untitled Project")
+  /* ── Auto-preparar: Gemini writes motion prompts ── */
+  /* ── 🎬 Indicaciones al director: briefing del PRODUCTOR por capítulo. Se guarda con
+     el capítulo y lo usan Auto-preparar y el Auto-prompt por escena hasta que se cambie. ── */
+  const [showBriefing, setShowBriefing] = useState(false)
+  const [briefing, setBriefing] = useState("")
+  const [briefingLoaded, setBriefingLoaded] = useState(false)
+  const [savingBriefing, setSavingBriefing] = useState(false)
 
-  useEffect(() => {
-    // Attempt to load project name from autosave or set a default
-    const autosaveData = loadAutosave()
-    if (autosaveData && autosaveData.name) {
-      setProjectName(autosaveData.name)
-    } else {
-      // If no autosave, check for initial project name if provided (though initialProps don't include name)
-      // For now, default to "Untitled Project"
-      setProjectName("Untitled Project")
+  const openBriefing = useCallback(async () => {
+    setShowBriefing((v) => !v)
+    if (!briefingLoaded && chapterId) {
+      try {
+        const r = await apiFetch(`/api/image-studio/chapters/${chapterId}/director-briefing`, { method: "GET" })
+        setBriefing(r.briefing || "")
+        setBriefingLoaded(true)
+      } catch { /* sin briefing previo */ }
     }
-  }, [initialMedia, initialClips]) // Rerun if initial props change, though unlikely
+  }, [briefingLoaded, chapterId])
+
+  const saveBriefing = useCallback(async () => {
+    if (!chapterId) return
+    setSavingBriefing(true)
+    try {
+      await apiFetch(`/api/image-studio/chapters/${chapterId}/director-briefing`, {
+        method: "POST",
+        body: JSON.stringify({ briefing }),
+      })
+      setStatusMsg(briefing.trim() ? "🎬 Indicaciones guardadas — el director las usará en los próximos prompts" : "🎬 Indicaciones borradas")
+      setShowBriefing(false)
+    } catch (e) {
+      setStatusMsg(`Error guardando indicaciones: ${e instanceof Error ? e.message : e}`)
+    } finally {
+      setSavingBriefing(false)
+    }
+  }, [chapterId, briefing])
+
+  const handleAutoPrepare = useCallback(async () => {
+    if (!chapterId) return
+    setIsAutoPreparing(true)
+    setStatusMsg("🤖 Analizando cada imagen y escribiendo motion prompts...")
+
+    try {
+      const result = await apiFetch(
+        `/api/image-studio/chapters/${chapterId}/auto-prepare-videos`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            default_duration: 10,
+            default_model: globalModel,
+            default_resolution: globalResolution,
+            // Modelo POR ESCENA: el director escribe cada ficha con el perfil del generador
+            // que el usuario eligió en ESA tarjeta (Seedance = timeline con acciones densas;
+            // Ken Burns = paneo simple). Antes mandaba solo el global (que arranca en
+            // ken-burns) y todas las fichas salían de foto fija.
+            scene_models: Object.fromEntries(scenes.map((s) => [s.index, s.model])),
+          }),
+        }
+      )
+
+      if (!mountedRef.current) return
+
+      if (result.scenes && Array.isArray(result.scenes)) {
+        setScenes((prev) =>
+          prev.map((s) => {
+            const prepared = result.scenes.find((r: any) => r.index === s.index)
+            if (!prepared || s.status === "done") return s
+            return {
+              ...s,
+              motionPrompt: prepared.motion_prompt || s.motionPrompt,
+              classification: prepared.scene_type || prepared.classification || "",
+              status: "ready" as const,
+              // Keep model and duration as-is — user already chose them
+            }
+          })
+        )
+        setStatusMsg(`✅ ${result.scenes.length} motion prompts escritos. Revisa y genera.`)
+      } else {
+        setStatusMsg("⚠️ Respuesta inesperada del servidor")
+      }
+    } catch (e: unknown) {
+      if (!mountedRef.current) return
+      setStatusMsg(`❌ Error: ${e instanceof Error ? e.message : "Error desconocido"}`)
+    } finally {
+      if (mountedRef.current) setIsAutoPreparing(false)
+    }
+  }, [chapterId, globalResolution])
+
+  /* ── Delete video from scene ── */
+  const deleteSceneVideo = useCallback(async (sceneIndex: number) => {
+    if (!chapterId) return
+    try {
+      await apiFetch(`/api/image-studio/chapters/${chapterId}/video/${sceneIndex}`, {
+        method: "DELETE",
+      })
+      setStatusMsg(`🗑 Video de escena ${sceneIndex + 1} eliminado`)
+    } catch {
+      // Backend says no video — that's fine, clean up UI anyway
+      setStatusMsg(`🗑 Escena ${sceneIndex + 1} reseteada`)
+    }
+    // ALWAYS reset the scene regardless of backend response
+    updateScene(sceneIndex, { status: "pending", videoUrl: null, errorMsg: "" })
+  }, [chapterId, updateScene])
+
+  const cancelSceneVideo = useCallback(async (sceneIndex: number) => {
+    const scene = scenes.find((s) => s.index === sceneIndex)
+    if (!chapterId || !scene?.jobId) {
+      updateScene(sceneIndex, { status: "pending", errorMsg: "" })
+      return
+    }
+    try {
+      const result = await apiFetch(`/api/image-studio/chapters/${chapterId}/cancel-job/${scene.jobId}`, {
+        method: "POST",
+      })
+      updateScene(sceneIndex, { status: "pending", jobId: null, errorMsg: "" })
+      setStatusMsg(result.credits_saved ? `✅ Escena ${sceneIndex + 1} cancelada — créditos ahorrados` : `⚠️ Escena ${sceneIndex + 1} cancelada — crédito ya consumido`)
+    } catch {
+      updateScene(sceneIndex, { status: "pending", jobId: null, errorMsg: "" })
+      setStatusMsg(`✕ Escena ${sceneIndex + 1} cancelada localmente`)
+    }
+  }, [chapterId, scenes, updateScene])
+
+  const cancelAllQueued = useCallback(async () => {
+    if (!chapterId) return
+    try {
+      const result = await apiFetch(`/api/image-studio/chapters/${chapterId}/cancel-all-queued`, { method: "POST" })
+      setScenes((prev) => prev.map((s) =>
+        s.status === "generating" ? { ...s, status: "pending" as const, jobId: null, errorMsg: "" } : s
+      ))
+      setStatusMsg(`✕ ${result.cancelled} jobs cancelados`)
+    } catch {
+      setStatusMsg("❌ Error al cancelar")
+    }
+  }, [chapterId])
+
+  /* ── Generate single scene ── */
+  // 🧪 Prueba aislada de Gemini Omni Flash — no toca el flujo normal de generación.
+  const omniTestScene = useCallback(async (sceneIndex: number) => {
+    if (!chapterId) return
+    try {
+      setStatusMsg(`🧪 Omni: generando prueba de la escena ${sceneIndex + 1}... (puede tardar)`)
+      const start = await apiFetch(`/api/omni-test/chapters/${chapterId}/scene/${sceneIndex}`, {
+        method: "POST",
+        body: JSON.stringify({ duration: 8, resolution: "720p" }),
+      })
+      const jobId = start.job_id
+      // Sondear hasta que termine
+      for (let i = 0; i < 150; i++) {
+        await new Promise((r) => setTimeout(r, 4000))
+        const st = await apiFetch(`/api/omni-test/jobs/${jobId}`)
+        if (st.status === "done" && st.video_url) {
+          setStatusMsg(`🧪 Omni ✅ escena ${sceneIndex + 1} — ${st.cost_note || ""}`)
+          window.open(st.video_url, "_blank")
+          return
+        }
+        if (st.status === "error") {
+          setStatusMsg(`🧪 Omni ❌ escena ${sceneIndex + 1}: ${st.cost_note || "error"}`)
+          return
+        }
+      }
+      setStatusMsg(`🧪 Omni: la prueba tardó demasiado. Revisa los logs de Render.`)
+    } catch (e: any) {
+      setStatusMsg(`🧪 Omni ❌ ${e?.message || e}`)
+    }
+  }, [chapterId, scenes])
+
+  const generateScene = useCallback(async (sceneIndex: number) => {
+    if (!chapterId) return
+    const scene = scenes.find((s) => s.index === sceneIndex)
+    if (!scene) return
+
+    updateScene(sceneIndex, { status: "generating", errorMsg: "" })
+
+    try {
+      let motionPromptToSend = scene.model === "ken-burns"
+        ? JSON.stringify(scene.kbConfig)
+        : scene.motionPrompt
+
+      // Auto-generate motion prompt if empty (for non-Ken Burns models)
+      if (!motionPromptToSend?.trim() && scene.model !== "ken-burns") {
+        setStatusMsg(`🤖 Generando prompt para escena ${sceneIndex + 1}...`)
+        const promptResult = await apiFetch(
+          `/api/image-studio/chapters/${chapterId}/improve-motion-prompt`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              segment_index: sceneIndex,
+              video_model: scene.model,
+              motion_prompt: "",
+              audio_prompt: "",
+            }),
+          }
+        )
+        motionPromptToSend = promptResult.motion_prompt || ""
+        // Update scene with the generated prompt
+        updateScene(sceneIndex, { 
+          motionPrompt: motionPromptToSend,
+          status: "generating" as const,
+        })
+      }
+
+      await apiFetch(`/api/image-studio/chapters/${chapterId}/animate-scene`, {
+        method: "POST",
+        body: JSON.stringify({
+          segment_index: sceneIndex,
+          video_model: scene.model,
+          duration_seconds: scene.duration,
+          resolution: scene.resolution,
+          motion_prompt: motionPromptToSend,
+        }),
+      })
+      startPolling()
+    } catch (e: unknown) {
+      updateScene(sceneIndex, {
+        status: "error",
+        errorMsg: e instanceof Error ? e.message : "Error al enviar",
+      })
+    }
+  }, [chapterId, scenes, updateScene])
+
+  /* ── Batch Generate ── */
+  const handleBatchGenerate = useCallback(async () => {
+    if (!chapterId) return
+    const pendingScenes = scenes.filter(
+      (s) => (s.status === "pending" || s.status === "ready" || s.status === "error") && s.model !== ""
+    )
+    if (pendingScenes.length === 0) {
+      setStatusMsg("⚠️ No hay escenas pendientes de generar.")
+      return
+    }
+
+    setIsBatchGenerating(true)
+    setStatusMsg(`🚀 Enviando ${pendingScenes.length} escenas...`)
+
+    setScenes((prev) =>
+      prev.map((s) => {
+        const isPending = pendingScenes.some((p) => p.index === s.index)
+        return isPending ? { ...s, status: "generating" as const } : s
+      })
+    )
+
+    let sent = 0
+    for (const scene of pendingScenes) {
+      try {
+        let motionPromptToSend = scene.model === "ken-burns"
+          ? JSON.stringify(scene.kbConfig)
+          : scene.motionPrompt
+
+        // Auto-generate motion prompt if empty
+        if (!motionPromptToSend?.trim() && scene.model !== "ken-burns") {
+          if (mountedRef.current) setStatusMsg(`🤖 Prompt escena ${scene.index + 1}... (${sent}/${pendingScenes.length})`)
+          const promptResult = await apiFetch(
+            `/api/image-studio/chapters/${chapterId}/improve-motion-prompt`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                segment_index: scene.index,
+                video_model: scene.model,
+                motion_prompt: "",
+                audio_prompt: "",
+              }),
+            }
+          )
+          motionPromptToSend = promptResult.motion_prompt || ""
+          updateScene(scene.index, { motionPrompt: motionPromptToSend })
+        }
+
+        await apiFetch(`/api/image-studio/chapters/${chapterId}/animate-scene`, {
+          method: "POST",
+          body: JSON.stringify({
+            segment_index: scene.index,
+            video_model: scene.model,
+            duration_seconds: scene.duration,
+            resolution: scene.resolution,
+            motion_prompt: motionPromptToSend,
+          }),
+        })
+        sent++
+        if (mountedRef.current) {
+          setStatusMsg(`🚀 Enviada ${sent}/${pendingScenes.length}...`)
+        }
+      } catch (e: unknown) {
+        updateScene(scene.index, {
+          status: "error",
+          errorMsg: e instanceof Error ? e.message : "Error al enviar",
+        })
+      }
+      await new Promise((r) => setTimeout(r, 300))
+    }
+
+    if (mountedRef.current) {
+      setStatusMsg(`✅ ${sent} escenas enviadas. Generando videos...`)
+      setIsBatchGenerating(false)
+      startPolling()
+    }
+  }, [chapterId, scenes, updateScene])
+
+  /* ── Export Chapter ── */
+  const handleExport = useCallback(async () => {
+    if (!chapterId || isExporting) return
+    setIsExporting(true)
+    setExportUrl(null)
+    setStatusMsg("📦 Iniciando exportación del capítulo completo...")
+
+    try {
+      // Enviar el volumen de cada escena + el de la narración (del mezclador)
+      const volume_map: Record<string, number> = {}
+      scenes.forEach((s) => { volume_map[String(s.index)] = (s.volume ?? 10) / 100 })
+      const result = await apiFetch(`/api/image-studio/chapters/${chapterId}/export-chapter`, {
+        method: "POST",
+        body: JSON.stringify({ include_audio: true, volume_map, narration_volume: narrationVol / 100 }),
+      })
+      const jobId = result.export_job_id
+      setStatusMsg("📦 Exportando... El worker está concatenando todos los clips + audio.")
+
+      // Poll export status (tracked in a ref so it can be cleared on unmount)
+      if (exportPollRef.current) clearInterval(exportPollRef.current)
+      exportPollRef.current = setInterval(async () => {
+        try {
+          const status = await apiFetch(`/api/image-studio/chapters/${chapterId}/export-status/${jobId}`)
+          if (status.status === "done" && status.download_url) {
+            if (exportPollRef.current) clearInterval(exportPollRef.current)
+            exportPollRef.current = null
+            setExportUrl(status.download_url)
+            setIsExporting(false)
+            setStatusMsg("✅ ¡Exportación completa! Click en 'Descargar' para obtener el video.")
+          } else if (status.status === "error") {
+            if (exportPollRef.current) clearInterval(exportPollRef.current)
+            exportPollRef.current = null
+            setIsExporting(false)
+            setStatusMsg(`❌ Error de exportación: ${status.error || "Error desconocido"}`)
+          } else {
+            setStatusMsg(`📦 Exportando... (${status.status})`)
+          }
+        } catch {
+          // Silent poll error
+        }
+      }, 10000) // Poll every 10 seconds
+
+    } catch (e: unknown) {
+      setIsExporting(false)
+      setStatusMsg(`❌ Error: ${e instanceof Error ? e.message : "Error"}`)
+    }
+  }, [chapterId, isExporting])
+
+  /* ── Polling ── */
+  const startPolling = useCallback(() => {
+    if (pollingRef.current || !chapterId) return
+    pollingRef.current = setInterval(async () => {
+      if (!mountedRef.current || !chapterId) {
+        if (pollingRef.current) clearInterval(pollingRef.current)
+        pollingRef.current = null
+        return
+      }
+
+      try {
+        const data = await apiFetch(`/api/image-studio/chapters/${chapterId}/video-progress`)
+        if (!data.videos || !mountedRef.current) return
+
+        let hasGenerating = false
+
+        setScenes((prev) =>
+          prev.map((s) => {
+            if (s.status !== "generating") return s
+            const vid = data.videos.find((v: any) => v.segment_index === s.index)
+            if (!vid) { hasGenerating = true; return s }
+
+            const isKB = s.model === "ken-burns"
+            const status = isKB ? vid.kb_status : vid.veo_status
+            const url = isKB ? vid.kb_url : vid.veo_url
+
+            if (status === "done" && url) {
+              onVideoGenerated(s.index, url)
+              return { ...s, status: "done" as const, videoUrl: url }
+            }
+            if (status === "error") {
+              return { ...s, status: "error" as const, errorMsg: vid.error_message || "Error de generación" }
+            }
+            hasGenerating = true
+            return s
+          })
+        )
+
+        if (!hasGenerating && pollingRef.current) {
+          clearInterval(pollingRef.current)
+          pollingRef.current = null
+          if (mountedRef.current) setStatusMsg("✅ Todos los videos completados")
+        }
+      } catch {
+        // Silent polling error
+      }
+    }, 8000)
+  }, [chapterId, onVideoGenerated])
+
+  if (!isOpen || !chapterData) return null
+
+  const pendingCount = scenes.filter((s) => s.status === "pending" || s.status === "ready").length
+  const generatingCount = scenes.filter((s) => s.status === "generating").length
+  const doneCount = scenes.filter((s) => s.status === "done").length
+  const errorCount = scenes.filter((s) => s.status === "error").length
+  const totalCost = scenes
+    .filter((s) => s.status !== "done")
+    .reduce((sum, s) => sum + getPrice(s.model, s.duration, s.resolution), 0)
+  const readyToGenerate = scenes.filter(
+    (s) => (s.status === "ready" || s.status === "pending") && (s.motionPrompt.trim() || s.model === "ken-burns")
+  ).length
 
   return (
-    <SidebarProvider defaultOpen={true}>
-      <div className="flex flex-col h-screen w-screen overflow-hidden bg-[var(--surface-0)] text-neutral-200 font-sans selection:bg-[var(--accent-muted)]">
-        {/* Main editor row */}
-        <div className="flex flex-1 min-h-0">
-          {/* Modals */}
-          <ExportModal
-            isOpen={isExportModalOpen}
-            onClose={() => {
-              if (!ffmpeg.isExporting) setIsExportModalOpen(false)
-            }}
-            onStartExport={(resolution) => startExport(resolution, "all")}
-            isExporting={ffmpeg.isExporting}
-            exportProgress={ffmpeg.exportProgress}
-            exportPhase={ffmpeg.exportPhase}
-            downloadUrl={ffmpeg.downloadUrl}
-            onCancel={handleCancelExport}
-            hasRenderedPreview={!!ffmpeg.renderedPreviewUrl && !ffmpeg.isPreviewStale}
-            ffmpegError={ffmpeg.ffmpegError}
-            chapterId={loadedChapterId}
-            chapterProjectName={loadedChapterData?.project_name}
-            chapterNumber={loadedChapterData?.chapter_number}
-            chapterTitle={loadedChapterData?.chapter_title}
-            audioUrls={
-              timeline.tracks
-                .filter((t) => t.type === "audio")
-                .flatMap((t) =>
-                  timeline.timelineClips
-                    .filter((c) => c.trackId === t.id)
-                    .map((c) => timeline.mediaMap[c.mediaId]?.url)
-                )
-                .filter(Boolean) as string[]
-            }
-          />
-          <ShortcutsModal isOpen={isShortcutsOpen} onClose={() => setIsShortcutsOpen(false)} />
-
-          {/* Hidden audio elements */}
-          {timeline.tracks
-            .filter((t) => t.type === "audio")
-            .map((track) => (
-              <audio
-                key={track.id}
-                ref={(el) => {
-                  if (el) playback.audioRefs.current[track.id] = el
-                }}
-                className="hidden"
-              />
-            ))}
-          <canvas ref={playback.canvasRef as React.RefObject<HTMLCanvasElement>} className="hidden" />
-
-          <EditorSidebar
-            activeView={activeView}
-            isPanelOpen={isPanelOpen}
-            onViewChange={handleViewChange}
-            onTogglePanel={() => setIsPanelOpen(!isPanelOpen)}
-            onBack={onBack}
-          />
-
-          {/* Main Content Area - wrapped in SidebarInset */}
-          <SidebarInset className="flex-1 flex flex-col min-w-0 max-h-[calc(100vh-28px)] min-h-[calc(100vh-28px)]">
-            <EditorHeader
-              onBack={onBack}
-              onUndo={timeline.undo}
-              onRedo={timeline.redo}
-              onExport={() => setIsExportModalOpen(true)}
-              onShowShortcuts={() => setIsShortcutsOpen(true)}
-              onSave={handleSaveProject}
-              onLoad={handleLoadProject}
-              onLoadDemo={handleLoadDemo}
-              isSaving={isSaving}
-              canUndo={timeline.history.length > 0}
-              canRedo={timeline.future.length > 0}
-            />
-
-            <div className="flex-1 flex overflow-hidden relative">
-              <SidebarPanelWrapper
-                isPanelOpen={isPanelOpen}
-                isCinemaMode={isCinemaMode}
-                sidebarWidth={sidebarWidth}
-                onResizeStart={(e) => {
-                  setIsResizingSidebar(true)
-                  sidebarResizeRef.current = { startX: e.clientX, startWidth: sidebarWidth }
-                }}
-              >
-                {/* Sidebar panel - Wrap each panel in PanelErrorBoundary */}
-                {isPanelOpen && !isCinemaMode && (
-                  <>
-                    {/* Wrap panel content in ErrorBoundary */}
-                    <ErrorBoundary>
-                      {activeView === "library" && (
-                        <PanelErrorBoundary fallbackTitle="Library Error">
-                          <ProjectLibrary
-                            media={timeline.media}
-                            selectedId={timeline.selectedClipIds[0]}
-                            onSelect={(m) => timeline.setSelectedClipIds([m.id])}
-                            onAddToTimeline={timeline.handleAddToTimeline}
-                            onImport={mediaManagement.handleImport}
-                            onRemove={timeline.handleRemoveMedia}
-                            onClose={() => setIsPanelOpen(false)}
-                          />
-                        </PanelErrorBoundary>
-                      )}
-                      {activeView === "create" && (
-                        <PanelErrorBoundary fallbackTitle="Production Panel Error">
-                          <div className="flex h-full w-[320px] flex-col border-r border-[var(--border-default)] bg-[var(--surface-0)]">
-                            <div className="flex h-10 items-center justify-between border-b border-[var(--border-default)] px-4">
-                              <span className="text-xs font-semibold text-white">🎬 Producción</span>
-                              <button onClick={() => setIsPanelOpen(false)} className="text-[var(--text-tertiary)] hover:text-white text-xs">✕</button>
-                            </div>
-                            <div className="flex-1 flex items-center justify-center p-6 text-center">
-                              {loadedChapterId && loadedChapterData ? (
-                                <div className="space-y-3">
-                                  <div className="text-sm text-white font-medium">{loadedChapterData.project_name}</div>
-                                  <div className="text-xs text-[var(--text-secondary)]">Cap {loadedChapterData.chapter_number}: {loadedChapterData.chapter_title}</div>
-                                  <button
-                                    onClick={() => setIsProductionModalOpen(true)}
-                                    className="w-full py-2.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors"
-                                  >
-                                    🎬 Abrir Ventana de Producción
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="text-xs text-[var(--text-tertiary)]">
-                                  Carga un capítulo desde el panel Zentrix primero.
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </PanelErrorBoundary>
-                      )}
-                      {activeView === "settings" && (
-                        <PanelErrorBoundary fallbackTitle="Settings Error">
-                          <SettingsPanel
-                            onClose={() => setIsPanelOpen(false)}
-                            onClearTimeline={() => timeline.setTimelineClips([])}
-                            onClearLibrary={() => timeline.setMedia([])}
-                            onClearAll={() => {
-                              timeline.setTimelineClips([])
-                              timeline.setMedia([])
-                              storyboard.setPanels([])
-                              storyboard.setMasterDescription("")
-                              playback.setCurrentTime(0)
-                              playback.setIsPlaying(false)
-                              clearAutosave()
-                              toastCtx.success("Started new project")
-                            }}
-                            defaultDuration={defaultDuration}
-                            onDurationChange={setDefaultDuration}
-                          />
-                        </PanelErrorBoundary>
-                      )}
-                      {activeView === "transitions" && (
-                        <PanelErrorBoundary fallbackTitle="Transitions Error">
-                          <TransitionsPanel
-                            onClose={() => setIsPanelOpen(false)}
-                            clips={timeline.timelineClips}
-                            selectedClipIds={timeline.selectedClipIds}
-                            onUpdateClip={timeline.handleClipUpdate}
-                            onApplyTransition={() => { }}
-                            selectedClipId={timeline.selectedClipIds[0] ?? null}
-                          />
-                        </PanelErrorBoundary>
-                      )}
-                      {activeView === "inspector" && (
-                        <PanelErrorBoundary fallbackTitle="Inspector Error">
-                          <InspectorPanel
-                            selectedClipId={timeline.selectedClipIds[0] ?? null}
-                            clips={timeline.timelineClips}
-                            mediaMap={timeline.mediaMap}
-                            onUpdateClip={timeline.handleClipUpdate}
-                            onClose={() => setIsPanelOpen(false)}
-                            tracks={timeline.tracks}
-                            onDeleteClip={(id) => timeline.handleDeleteClip([id])}
-                            onDuplicateClip={(id) => timeline.handleDuplicateClip([id])}
-                            onSplitClip={timeline.handleSplitClip}
-                          />
-                        </PanelErrorBoundary>
-                      )}
-                      {activeView === "storyboard" && (
-                        <PanelErrorBoundary fallbackTitle="Storyboard Error">
-                          <StoryboardPanelComponent
-                            panels={storyboard.panels}
-                            onAddPanel={storyboard.addPanel}
-                            onUpdatePanel={storyboard.updatePanel}
-                            onDeletePanel={storyboard.deletePanel}
-                            onGenerateImage={storyboard.generateImage}
-                            onGenerateVideo={storyboard.generateVideo}
-                            onUpscaleImage={storyboard.upscaleImage}
-                            onAddToTimeline={handleAddStoryboardToTimeline}
-                            videoConfig={videoConfig}
-                            onVideoConfigChange={setVideoConfig}
-                            masterDescription={storyboard.masterDescription}
-                            onMasterDescriptionChange={storyboard.setMasterDescription}
-                            onClose={() => setIsPanelOpen(false)}
-                            isEnhancingMaster={isEnhancingMaster}
-                            setIsEnhancingMaster={setIsEnhancingMaster}
-                            setIsEnhancing={setIsEnhancing}
-                            setMasterDescription={storyboard.setMasterDescription}
-                            setPrompt={setPrompt}
-                            setVideoConfig={setVideoConfig}
-                          />
-                        </PanelErrorBoundary>
-                      )}
-                      {activeView === "zentrix" && (
-                        <PanelErrorBoundary fallbackTitle="Zentrix Error">
-                          <ZentrixPanel
-                            onClose={() => setIsPanelOpen(false)}
-                            onOpenProduction={() => setIsProductionModalOpen(true)}
-                            onClearProject={() => {
-                              timeline.setMedia([])
-                              timeline.setTimelineClips([])
-                              setLoadedChapterId(null)
-                              setLoadedChapterData(null)
-                            }}
-                            onLoadChapter={(result: ZentrixChapterWithTiming) => {
-                              const { data, timing, chapterId: chapId } = result
-                              setLoadedChapterId(chapId)
-                              setLoadedChapterData(data)
-                              const mediaItems: MediaItem[] = []
-                              const clips: TimelineClip[] = []
-
-                              const validScenes = data.scenes.filter((s) => s.video_url || s.image_url)
-                              const audioDuration = data.audio_duration || 60
-
-                              // Build timing map — PRIORIDAD:
-                              // 1) start/end del análisis del capítulo (fuente de verdad,
-                              //    cuadrados con la duración real del audio por el backend)
-                              // 2) análisis Gemini del editor (respaldo, capítulos viejos)
-                              // 3) división pareja (último recurso)
-                              const timingMap = new Map<number, { start: number; duration: number }>()
-                              const lastSceneEnd = validScenes.length
-                                ? Math.max(...validScenes.map((s) => s.end_time || 0))
-                                : 0
-
-                              if (lastSceneEnd > 1) {
-                                for (const s of validScenes) {
-                                  timingMap.set(s.index, {
-                                    start: s.start_time || 0,
-                                    duration: Math.max(0.5, (s.end_time || 0) - (s.start_time || 0)),
-                                  })
-                                }
-                              } else if (timing && timing.length > 0) {
-                                // Use Gemini's analysis
-                                for (const t of timing) {
-                                  timingMap.set(t.index, { start: t.start_time, duration: t.end_time - t.start_time })
-                                }
-                              } else {
-                                // Fallback: divide audio evenly
-                                const perScene = audioDuration / (validScenes.length || 1)
-                                validScenes.forEach((s, i) => {
-                                  timingMap.set(s.index, { start: i * perScene, duration: perScene })
-                                })
-                              }
-
-                              for (const scene of validScenes) {
-                                const url = scene.video_url || scene.image_url
-                                if (!url) continue
-
-                                const mediaId = `zentrix-s${scene.index}`
-                                const isVideo = !!scene.video_url
-                                const t = timingMap.get(scene.index) || { start: 0, duration: 10 }
-
-                                mediaItems.push({
-                                  id: mediaId,
-                                  url,
-                                  prompt: scene.image_prompt || scene.text_excerpt || `Escena ${scene.index + 1}`,
-                                  duration: t.duration,
-                                  aspectRatio: "16:9",
-                                  thumbnailUrl: scene.image_url || undefined,
-                                  status: "ready",
-                                  type: isVideo ? "video" : "image",
-                                  resolution: { width: 1280, height: 720 },
-                                })
-
-                                clips.push({
-                                  speed: 1,
-                                  id: `clip-z-${scene.index}-${Date.now()}`,
-                                  mediaId,
-                                  trackId: "v1",
-                                  start: t.start,
-                                  duration: t.duration,
-                                  offset: 0,
-                                  volume: 1,
-                                })
-                              }
-
-                              // Add audio
-                              if (data.audio_url) {
-                                const audioId = "zentrix-audio"
-                                mediaItems.push({
-                                  id: audioId,
-                                  url: data.audio_url,
-                                  prompt: `Audio: ${data.chapter_title}`,
-                                  duration: audioDuration,
-                                  aspectRatio: "16:9",
-                                  status: "ready",
-                                  type: "audio",
-                                })
-                                clips.push({
-                                  speed: 1,
-                                  id: `clip-z-audio-${Date.now()}`,
-                                  mediaId: audioId,
-                                  trackId: "a1",
-                                  start: 0,
-                                  duration: audioDuration,
-                                  offset: 0,
-                                  volume: 1,
-                                })
-                              }
-
-                              timeline.setMedia(mediaItems)
-                              // Pistas según el modo del capítulo:
-                              //  · Narrado: video (ambiente) al 30%, narración al 100%.
-                              //  · 🗣 Modo Diálogo: las VOCES van EN los clips → pista de video al 100%
-                              //    (antes quedaba al 30% y el diálogo casi no se oía en la vista previa).
-                              const isDialogue = !!(data as any).dialogue_mode
-                              timeline.setTracks([
-                                { id: "v1", type: "video", name: "VIDEO 1", isMuted: false, volume: isDialogue ? 1.0 : 0.3, isLocked: false },
-                                { id: "a1", type: "audio", name: "AUDIO 1", isMuted: false, volume: 1.0, isLocked: false },
-                              ])
-                              setTimeout(() => {
-                                timeline.setTimelineClips(clips)
-                              }, 100)
-                              setActiveView("library")
-                            }}
-                          />
-                        </PanelErrorBoundary>
-                      )}
-                    </ErrorBoundary>
-
-                    {/* Sidebar resize handle */}
-                    {/* Updated resize handle hover color from indigo to pink */}
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-[var(--accent-hover)] transition-colors"
-                      onMouseDown={(e) => {
-                        setIsResizingSidebar(true)
-                        sidebarResizeRef.current = { startX: e.clientX, startWidth: sidebarWidth }
-                      }}
-                    />
-                  </>
-                )}
-              </SidebarPanelWrapper>
-              {/* Main preview area */}
-              <div className="flex-1 flex flex-col bg-[var(--surface-0)] min-w-0">
-                {/* Preview Player - Wrap in PanelErrorBoundary */}
-                <PanelErrorBoundary fallbackTitle="Preview Error">
-                  <PreviewPlayer
-                    currentTime={playback.currentTime}
-                    isPlaying={playback.isPlaying}
-                    duration={timeline.timelineDuration}
-                    onSeek={playback.handleSeek}
-                    onTogglePlay={() => playback.setIsPlaying((p) => !p)}
-                    videoRefA={playback.videoRefA}
-                    videoRefB={playback.videoRefB}
-                    whiteOverlayRef={playback.whiteOverlayRef}
-                    previewVideoRef={playback.previewVideoRef}
-                    renderedPreviewUrl={ffmpeg.renderedPreviewUrl}
-                    isPreviewPlayback={playback.isPreviewPlayback}
-                    isPreviewStale={ffmpeg.isPreviewStale}
-                    onRenderPreview={handleRenderPreview}
-                    onCancelRender={handleCancelRender}
-                    isRendering={ffmpeg.isRendering}
-                    renderProgress={ffmpeg.renderProgress}
-                    onTogglePreviewPlayback={() => playback.setIsPreviewPlayback(!playback.isPreviewPlayback)}
-                    playerZoom={playerZoom}
-                    onZoomChange={setPlayerZoom}
-                    isCinemaMode={isCinemaMode}
-                    onToggleCinemaMode={() => setIsCinemaMode((p) => !p)}
-                    isSafeGuidesVisible={isSafeGuidesVisible}
-                    onToggleSafeGuides={() => setIsSafeGuidesVisible((p) => !p)}
-                    ffmpegLoaded={ffmpeg.ffmpegLoaded}
-                    ffmpegLoading={ffmpeg.ffmpegLoading}
-                    onLoadFFmpeg={ffmpeg.loadFFmpeg}
-                    timelineClips={timeline.timelineClips}
-                    mediaMap={timeline.mediaMap}
-                    isExporting={ffmpeg.isExporting}
-                    onPlay={() => playback.setIsPlaying(true)}
-                    onZoomReset={() => setPlayerZoom(1)}
-                    activeClip={timeline.timelineClips.find(
-                      (c) => {
-                        const track = timeline.tracks.find((t) => t.id === c.trackId)
-                        return track?.type === "video" &&
-                          playback.currentTime >= c.start &&
-                          playback.currentTime < c.start + c.duration
-                      }
-                    )}
-                    // Pass text clips to preview player for rendering text overlays
-                    textClips={timeline.timelineClips.filter((c) => {
-                      const track = timeline.tracks.find((t) => t.id === c.trackId)
-                      return track?.type === "text" && c.textOverlay
-                    })}
-                  />
-                </PanelErrorBoundary>
-
-                {/* Timeline - Wrap in PanelErrorBoundary */}
-                {!isCinemaMode && (
-                  <PanelErrorBoundary fallbackTitle="Timeline Error">
-                    <div
-                      className="border-t border-neutral-800 flex flex-col shrink-0 relative"
-                      style={{ height: timelineHeight }}
-                    >
-                      {/* Resize handle */}
-                      {/* Updated timeline resize handle hover from indigo to pink */}
-                      <div
-                        className="absolute z-20 top-0 right-0 left-0  h-1.5 cursor-n-resize hover:bg-[var(--accent-primary)]/40 focus:bg-[var(--accent-primary)]/40 active:bg-[var(--accent-primary)]/40 transition-colors group"
-                        onMouseDown={(e) => {
-                          setIsResizingTimeline(true)
-                          resizeRef.current = { startY: e.clientY, startHeight: timelineHeight }
-                        }}
-
-                      >
-                        <div className="absolute top-0 right-0 left-0  h-px group-hover:bg-[var(--accent-primary)]/60 group-focus:bg-[var(--accent-primary)]/60 group-active:bg-[var(--accent-primary)]/60" />
-                      </div>
-                      <Timeline
-                        tracks={timeline.tracks}
-                        clips={timeline.timelineClips}
-                        mediaMap={timeline.mediaMap}
-                        currentTime={playback.currentTime}
-                        duration={timeline.timelineDuration}
-                        zoomLevel={timeline.zoomLevel}
-                        selectedClipIds={timeline.selectedClipIds}
-                        tool={timeline.tool}
-                        isPlaying={playback.isPlaying}
-                        isLooping={isLooping}
-                        onPlayPause={() => playback.setIsPlaying((p) => !p)}
-                        onToggleLoop={() => setIsLooping((l) => !l)}
-                        onSeek={playback.handleSeek}
-                        onZoomChange={timeline.setZoomLevel}
-                        onToolChange={timeline.setTool}
-                        onSelectClips={timeline.handleSelectClips}
-                        onClipUpdate={timeline.handleClipUpdate}
-                        onTrackUpdate={timeline.handleTrackUpdate}
-                        onSplitClip={timeline.handleSplitClip}
-                        onDeleteClip={timeline.handleDeleteClip}
-                        onRippleDeleteClip={timeline.handleRippleDeleteClip}
-                        onDuplicateClip={timeline.handleDuplicateClip}
-                        onDragStart={timeline.pushToHistory}
-                        onDetachAudio={timeline.handleDetachAudio}
-                        onExportAudio={handleExportAudio}
-                        isRendering={ffmpeg.isRendering}
-                        renderProgress={ffmpeg.renderProgress}
-                        renderedPreviewUrl={ffmpeg.renderedPreviewUrl}
-                        isPreviewStale={ffmpeg.isPreviewStale}
-                        onRenderPreview={handleRenderPreview}
-                        onCancelRender={handleCancelRender}
-                        isPreviewPlayback={playback.isPreviewPlayback}
-                        onTogglePreviewPlayback={playback.handleTogglePreviewPlayback}
-                        historyCount={timeline.history.length}
-                        futureCount={timeline.future.length}
-                        onUndo={timeline.undo}
-                        onRedo={timeline.redo}
-                        onShowShortcuts={() => setIsShortcutsOpen(true)}
-                        markers={markers}
-                        onAddMarker={() => setShowAddMarkerDialog(true)}
-                        onMarkerClick={handleMarkerClick}
-                        onMarkerDelete={handleMarkerDelete}
-                        onMarkerUpdate={handleMarkerUpdate}
-                        onZoomToFit={handleZoomToFit}
-                        onOverwriteClips={timeline.handleOverwriteClips}
-                      />
-                    </div>
-                  </PanelErrorBoundary>
-                )}
-              </div>
-            </div>
-          </SidebarInset>
+    <div className="fixed inset-0 z-50 bg-[#0a0a0f] flex flex-col">
+      {/* ═══ HEADER ═══ */}
+      <div className="flex items-center justify-between px-6 py-3 border-b border-[var(--border-default)] bg-[var(--surface-0)]">
+        <div>
+          <h1 className="text-sm font-bold text-white">
+            🎬 Producción — {chapterData.project_name}
+          </h1>
+          <p className="text-[10px] text-[var(--text-tertiary)]">
+            Cap {chapterData.chapter_number}: {chapterData.chapter_title} — {scenes.length} escenas
+          </p>
         </div>
 
-        <StatusBar
-          projectName={projectName}
-          totalDuration={timeline.timelineDuration}
-          clipCount={timeline.timelineClips.length}
-          trackCount={timeline.tracks.length}
-          isSaving={isSaving}
-          isExporting={ffmpeg.isExporting}
-          isGenerating={mediaGeneration.isGenerating}
-          isRendering={ffmpeg.isRendering}
-          zoomLevel={timeline.zoomLevel}
-        />
+        {/* Global: Tiers + Manual + Resolution */}
+        <div className="flex items-center gap-2">
+          {/* Tier Buttons */}
+          {(Object.entries(TIER_CONFIG) as [TierName, typeof TIER_CONFIG[TierName]][]).map(([key, cfg]) => (
+            <button
+              key={key}
+              onClick={() => applyTier(key)}
+              className={`px-3 py-1.5 text-[10px] font-medium text-white rounded-lg transition-all ${
+                activeTier === key
+                  ? cfg.color + " ring-1 ring-white/40"
+                  : "bg-[var(--surface-2)] hover:bg-[var(--surface-3)] border border-[var(--border-default)]"
+              }`}
+              title={cfg.description}
+            >
+              {cfg.emoji} {cfg.label}
+            </button>
+          ))}
 
-        {/* Add marker dialog */}
-        <AddMarkerDialog
-          isOpen={showAddMarkerDialog}
-          onClose={() => setShowAddMarkerDialog(false)}
-          onAdd={handleAddMarker}
-          time={playback.currentTime} // Use playback.currentTime for the marker time
-        />
+          {/* Separator */}
+          <div className="w-px h-6 bg-[var(--border-default)] mx-1" />
 
-        {/* Production Panel (fullscreen modal) */}
-        <ProductionPanel
-          isOpen={isProductionModalOpen}
-          onClose={() => setIsProductionModalOpen(false)}
-          chapterData={loadedChapterData}
-          chapterId={loadedChapterId}
-          onVideoGenerated={(sceneIndex, videoUrl) => {
-            const mediaId = `zentrix-s${sceneIndex}`
-            timeline.setMedia((prev) =>
-              prev.map((m) =>
-                m.id === mediaId ? { ...m, url: videoUrl, type: "video" as const } : m
-              )
-            )
-          }}
-        />
+          {/* Manual model selector */}
+          <div className="flex flex-col">
+            <label className="text-[8px] text-[var(--text-tertiary)] uppercase mb-0.5">Manual</label>
+            <select
+              value={globalModel}
+              onChange={(e) => { setGlobalModel(e.target.value); setActiveTier("manual") }}
+              className="px-2 py-1 text-[10px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded text-white"
+            >
+              {MODELS.map((m) => (
+                <option key={m.id} value={m.id}>{m.emoji} {m.name} ({m.tier})</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col">
+            <label className="text-[8px] text-[var(--text-tertiary)] uppercase mb-0.5">Resolución</label>
+            <select
+              value={globalResolution}
+              onChange={(e) => setGlobalResolution(e.target.value as Resolution)}
+              className="px-2 py-1 text-[10px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded text-white"
+            >
+              <option value="480p">480p (solo Seedance)</option>
+              <option value="720p">720p</option>
+              <option value="1080p">1080p</option>
+            </select>
+          </div>
+
+          <button
+            onClick={applyGlobalToAll}
+            className="px-3 py-1.5 text-[10px] font-medium text-white bg-[var(--surface-2)] hover:bg-[var(--surface-3)] border border-[var(--border-default)] rounded-lg transition-colors mt-2.5"
+            title="Aplica el modelo Manual seleccionado a escenas compatibles"
+          >
+            Aplicar Manual
+          </button>
+
+          <button
+            onClick={onClose}
+            className="ml-2 px-3 py-1.5 text-[10px] font-medium text-[var(--text-tertiary)] hover:text-white border border-[var(--border-default)] hover:border-red-500 rounded-lg transition-colors mt-2.5"
+          >
+            ✕ Cerrar
+          </button>
+        </div>
       </div>
-    </SidebarProvider>
-  )
-}
 
-export default Editor
+      {/* ═══ ACTION BAR ═══ */}
+      <div className="flex items-center justify-between px-6 py-2.5 border-b border-[var(--border-default)] bg-[var(--surface-1)]">
+        <div className="flex items-center gap-4 text-[10px]">
+          <span className="text-[var(--text-tertiary)]">{scenes.length} escenas</span>
+          {doneCount > 0 && <span className="text-green-400">✅ {doneCount} listas</span>}
+          {generatingCount > 0 && <span className="text-amber-400 animate-pulse">⏳ {generatingCount} generando</span>}
+          {errorCount > 0 && <span className="text-red-400">❌ {errorCount} errores</span>}
+          <span className="text-[var(--text-tertiary)]">⏸ {pendingCount} pendientes</span>
+          <span className="text-white font-bold text-xs">Costo: ${totalCost.toFixed(2)}</span>
+          {activeTier && activeTier !== "manual" && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--surface-2)] border border-[var(--border-default)]">
+              {TIER_CONFIG[activeTier].emoji} {TIER_CONFIG[activeTier].label}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={async () => {
+              if (!chapterId) return
+              setStatusMsg("🔄 Actualizando...")
+              try {
+                const data = await apiFetch(`/api/image-studio/chapters/${chapterId}/video-progress`)
+                if (!data.videos) return
+                let updated = 0
+                setScenes((prev) =>
+                  prev.map((s) => {
+                    const vid = data.videos.find((v: any) => v.segment_index === s.index)
+
+                    // If backend has no record, do NOT touch the scene.
+                    // (A momentary incomplete response must never wipe a finished video.)
+                    if (!vid) {
+                      return s
+                    }
+
+                    // Determine best URL: prefer AI model over ken-burns
+                    const veoUrl = vid.veo_url
+                    const kbUrl = vid.kb_url
+                    const veoStatus = vid.veo_status
+                    const kbStatus = vid.kb_status
+                    const isKB = s.model === "ken-burns"
+                    const relevantStatus = isKB ? kbStatus : (veoStatus !== "none" ? veoStatus : kbStatus)
+                    const relevantUrl = isKB ? kbUrl : (veoUrl || kbUrl)
+
+                    // Note: we intentionally do NOT downgrade a finished scene to
+                    // "pending" just because the backend reports "none" — that caused
+                    // good videos to disappear on a partial response.
+
+                    // Update if: new video found, or status changed, or URL refreshed
+                    if (relevantStatus === "done" && relevantUrl) {
+                      if (s.status !== "done" || s.videoUrl !== relevantUrl) {
+                        updated++
+                        onVideoGenerated(s.index, relevantUrl)
+                        return { ...s, status: "done" as const, videoUrl: relevantUrl, errorMsg: "" }
+                      }
+                    } else if (relevantStatus === "error" && s.status !== "error") {
+                      updated++
+                      return { ...s, status: "error" as const, errorMsg: vid.veo_error || "Error de generación" }
+                    } else if ((relevantStatus === "queued" || relevantStatus === "processing" || relevantStatus === "polling") && s.status !== "generating") {
+                      return { ...s, status: "generating" as const }
+                    }
+                    return s
+                  })
+                )
+                setStatusMsg(updated > 0 ? `🔄 ${updated} escenas actualizadas` : "✅ Todo al día — sin cambios")
+              } catch { setStatusMsg("❌ Error al actualizar") }
+            }}
+            className="px-3 py-2 text-xs font-medium text-white bg-cyan-600 hover:bg-cyan-500 rounded-lg transition-colors flex items-center gap-1"
+          >
+            🔄 Actualizar
+          </button>
+
+          {/* 🎥 Director de Video RETIRADO del panel (23-jul, decisión de Richi): el backend
+              está desactivado. El código de estado/lógica queda abajo por si se retoma. */}
+
+          <button
+            onClick={openBriefing}
+            className={`px-4 py-2 text-xs font-medium rounded-lg transition-colors flex items-center gap-2 ${briefing.trim() ? "text-amber-200 bg-amber-700/60 hover:bg-amber-600/60" : "text-white bg-neutral-700 hover:bg-neutral-600"}`}
+            title="Escríbele al director qué quieres para ESTE capítulo (género, energía, crudeza, dónde hay acción...). Él decide dónde aplicarlo escena por escena."
+          >
+            🎬 Director{briefing.trim() ? " ●" : ""}
+          </button>
+
+          <button
+            onClick={handleAutoPrepare}
+            disabled={isAutoPreparing || isBatchGenerating}
+            className="px-4 py-2 text-xs font-medium text-white bg-purple-600 hover:bg-purple-500 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-2"
+          >
+            {isAutoPreparing ? (
+              <><span className="animate-spin">🤖</span> Escribiendo prompts...</>
+            ) : (
+              <>🤖 Auto-preparar prompts</>
+            )}
+          </button>
+
+          <button
+            onClick={handleBatchGenerate}
+            disabled={isBatchGenerating || isAutoPreparing || readyToGenerate === 0}
+            className="px-4 py-2 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-2"
+          >
+            {isBatchGenerating ? (
+              <><span className="animate-spin">🚀</span> Enviando...</>
+            ) : (
+              <>🚀 Generar {readyToGenerate > 0 ? `${readyToGenerate} escenas` : "Todos"} (${totalCost.toFixed(2)})</>
+            )}
+          </button>
+
+          {generatingCount > 0 && (
+            <button
+              onClick={cancelAllQueued}
+              className="px-3 py-2 text-xs font-medium text-red-400 border border-red-800 hover:bg-red-900/30 rounded-lg transition-colors flex items-center gap-1"
+            >
+              ✕ Cancelar Todo ({generatingCount})
+            </button>
+          )}
+
+          <button
+            onClick={() => setIsBrowserExportOpen(true)}
+            disabled={doneCount === 0}
+            title="Exporta el video en tu computadora usando FFmpeg.wasm — sin usar el servidor"
+            className="px-4 py-2 text-xs font-medium text-white bg-cyan-600 hover:bg-cyan-500 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-2"
+          >
+            💻 Exportar en mi PC
+          </button>
+
+          <button
+            onClick={handleExport}
+            disabled={isExporting || doneCount === 0}
+            title="Combina todos los videos + audio en el servidor (fallback)"
+            className="px-4 py-2 text-xs font-medium text-white bg-green-600 hover:bg-green-500 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-2"
+          >
+            {isExporting ? (
+              <><span className="animate-spin">📦</span> Exportando...</>
+            ) : (
+              <>📦 Servidor (fallback)</>
+            )}
+          </button>
+
+          {exportUrl && (
+            <a
+              href={exportUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-400 rounded-lg transition-colors flex items-center gap-2 animate-pulse"
+            >
+              ⬇️ Descargar Video
+            </a>
+          )}
+        </div>
+      </div>
+
+      {/* ═══ 🎬 INDICACIONES AL DIRECTOR — briefing del productor por capítulo ═══ */}
+      {showBriefing && (
+        <div className="px-6 py-3 border-b border-amber-800/50 bg-amber-950/30">
+          <div className="text-[11px] font-bold text-amber-300 mb-1.5">
+            🎬 Escríbele al director qué quieres para ESTE capítulo — él decide dónde aplicarlo escena por escena
+          </div>
+          <textarea
+            value={briefing}
+            onChange={(e) => setBriefing(e.target.value)}
+            rows={3}
+            placeholder='Ej: "Esta es una historia de terror. En este capítulo hay acción, más movimiento de personajes, crudeza — probablemente una pelea. Quiero que lo transmitas."'
+            className="w-full text-xs bg-[var(--surface-0)] border border-amber-800/60 rounded-lg px-3 py-2 text-neutral-200 focus:outline-none focus:border-amber-500 resize-y"
+          />
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              onClick={saveBriefing}
+              disabled={savingBriefing}
+              className="px-4 py-1.5 text-xs font-medium text-white bg-amber-600 hover:bg-amber-500 rounded-lg transition-colors disabled:opacity-40"
+            >
+              {savingBriefing ? "Guardando..." : "Guardar indicaciones"}
+            </button>
+            <button
+              onClick={() => setShowBriefing(false)}
+              className="px-3 py-1.5 text-xs text-neutral-400 hover:text-white transition-colors"
+            >
+              Cancelar
+            </button>
+            <span className="text-[10px] text-neutral-500">
+              Se guarda con el capítulo — lo usan Auto-preparar y el Auto-prompt por escena hasta que lo cambies o lo borres.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ MEZCLADOR — audio de videos + narración (por pista) ═══ */}
+      <div className="flex items-center gap-4 px-6 py-2 border-b border-[var(--border-default)] bg-[var(--surface-1)] flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-bold text-[var(--text-secondary)] whitespace-nowrap">🎬 Audio de videos:</span>
+          <input
+            type="range" min={0} max={100} value={masterVol}
+            onChange={(e) => {
+              const v = Number(e.target.value)
+              setMasterVol(v)
+              setScenes((prev) => prev.map((s) => ({ ...s, volume: v })))
+            }}
+            className="w-[200px] accent-blue-500"
+            title={`Volumen del audio de todos los videos: ${masterVol}%`}
+          />
+          <span className="text-[11px] font-bold text-white w-9 text-right">{masterVol}%</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-bold text-[var(--text-secondary)] whitespace-nowrap">🎙 Narración:</span>
+          <input
+            type="range" min={0} max={100} value={narrationVol}
+            onChange={(e) => setNarrationVol(Number(e.target.value))}
+            className="w-[200px] accent-emerald-500"
+            title={`Volumen de la narración (voz): ${narrationVol}%`}
+          />
+          <span className="text-[11px] font-bold text-white w-9 text-right">{narrationVol}%</span>
+        </div>
+        <span className="text-[9px] text-[var(--text-tertiary)]">Aplica al exportar por Servidor.</span>
+      </div>
+
+      {/* Status */}
+      {directorStatus && directorStatus.status === "running" && (
+        <div className="mx-4 mt-2 px-4 py-2.5 rounded-lg bg-amber-950/60 border border-amber-700 text-amber-200 text-xs flex items-center gap-3">
+          <span className="animate-pulse">🎥</span>
+          <span className="font-semibold">Director de Video trabajando — escena {directorStatus.current_scene}/{directorStatus.total_scenes}</span>
+          <span className="text-amber-400">{directorStatus.phase === "direct" ? (directorStatus.retake_in_progress ? "🔄 dirigiendo 2ª toma" : "👁 dirigiendo (viendo material)") : directorStatus.phase === "generating" ? "⚙️ generando video" : "🔍 revisando la toma"}</span>
+          {directorStatus.use_frames && <span className="text-amber-500">· modo fotogramas</span>}
+          {directorStatus.alerts?.length > 0 && <span className="text-orange-400">· ⚠ {directorStatus.alerts.length} alertas</span>}
+        </div>
+      )}
+      {directorStatus && directorStatus.status === "paused" && (
+        <div className="mx-4 mt-2 px-4 py-3 rounded-lg bg-red-950/60 border border-red-700 text-red-200 text-xs">
+          <div className="font-bold mb-1">⏸ Director en PAUSA — escena {directorStatus.current_scene}/{directorStatus.total_scenes} falló dos tomas</div>
+          {directorStatus.alerts?.length > 0 && (
+            <div className="mb-2 text-red-300">Diagnóstico del director: {directorStatus.alerts[directorStatus.alerts.length - 1]?.diagnosis}</div>
+          )}
+          <div className="flex gap-2 mt-1">
+            <button onClick={() => directorContinue(false)} disabled={directorBusy}
+              className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-md font-medium">▶ Continuar (reintenta la escena con el modelo del selector)</button>
+            <button onClick={() => directorContinue(true)} disabled={directorBusy}
+              className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded-md font-medium">⏭ Aceptar como está y saltar</button>
+          </div>
+          <div className="mt-1.5 text-red-400/80">Cambia el modelo en el selector de arriba si quieres que reintente con otro generador, o regenera la escena a mano y usa "Aceptar y saltar".</div>
+        </div>
+      )}
+      {directorStatus && directorStatus.status === "done" && directorStatus.alerts?.length > 0 && (
+        <div className="mx-4 mt-2 px-4 py-2.5 rounded-lg bg-emerald-950/60 border border-emerald-700 text-emerald-200 text-xs">
+          🎬 Director terminó el capítulo con {directorStatus.alerts.length} escena(s) marcada(s) ⚠: {directorStatus.alerts.map((a: any) => `E${a.idx + 1}`).join(", ")} — revísalas y regenera las que no te convenzan.
+        </div>
+      )}
+      {statusMsg && (
+        <div className="px-6 py-2 bg-[var(--surface-2)] border-b border-[var(--border-default)]">
+          <div className="text-xs text-amber-300">{statusMsg}</div>
+        </div>
+      )}
+
+      {/* ═══ SCENE GRID ═══ */}
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
+          {scenes.map((scene) => {
+            const sceneData = chapterData.scenes.find((s) => s.index === scene.index)
+            if (!sceneData) return null
+            return (
+              <SceneCard
+                key={scene.index}
+                scene={scene}
+                sceneData={sceneData}
+                savedKBPresets={savedKBPresets}
+                onSaveKBPreset={saveKBPreset}
+                onAutoPrompt={handleAutoPromptScene}
+                onDeleteKBPreset={deleteKBPreset}
+                onApplyKBToAll={applyKBToAll}
+                onChange={(updates) => updateScene(scene.index, updates)}
+                onGenerate={() => generateScene(scene.index)}
+                onCancel={() => cancelSceneVideo(scene.index)}
+                onDelete={() => deleteSceneVideo(scene.index)}
+                onOmniTest={() => omniTestScene(scene.index)}
+              />
+            )
+          })}
+        </div>
+
+        {scenes.length === 0 && (
+          <div className="flex items-center justify-center h-64 text-[var(--text-tertiary)]">
+            <div className="text-center">
+              <div className="text-4xl mb-3 opacity-30">🎬</div>
+              <div className="text-sm">No hay escenas con imagen generada</div>
+              <div className="text-xs mt-1">Genera las imágenes primero en Image Studio</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Export Modal — Web Worker + cola (mismo componente que usa el editor).
+          Antes esto era <BrowserExportDialog>, que armaba un crossfade con TODOS
+          los clips en una sola llamada ffmpeg: con 50-70 escenas eso se cuelga
+          o se cae en el navegador. ExportModal usa el worker (export-worker.ts)
+          que solo concatena (los fundidos ya vienen horneados por clip desde
+          el servidor), y corre en cola sin bloquear la edición. */}
+      <ExportModal
+        isOpen={isBrowserExportOpen}
+        onClose={() => setIsBrowserExportOpen(false)}
+        chapterId={chapterId}
+        chapterProjectName={chapterData.project_name || "Zentrix"}
+        chapterTitle={chapterData.chapter_title || ""}
+        chapterNumber={chapterData.chapter_number || 1}
+        audioUrls={chapterData.audio_url ? [chapterData.audio_url] : []}
+        onStartExport={() => {}}
+        isExporting={false}
+        exportProgress={0}
+        exportPhase="idle"
+        downloadUrl={null}
+        onCancel={() => {}}
+      />
+    </div>
+  )
+})
+
+export default ProductionPanel
