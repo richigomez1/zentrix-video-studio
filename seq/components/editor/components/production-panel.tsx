@@ -18,6 +18,7 @@ interface ModelInfo {
   durations: number[]
   price720: number
   price1080: number
+  price480?: number      // Solo modelos que VENDEN 480p (Seedance OR). Si falta, la UI no ofrece 480p.
   emoji: string
   tier: string
 }
@@ -42,9 +43,14 @@ const MODELS: ModelInfo[] = [
   // Hasta 30s por clip — el único junto a Ken Burns que pasa de 20s. 1080p cuesta 2×.
   // El facturado real por video sale en el log [WAN3 ✅ ... facturado Ns] de Render.
   { id: "wan3.0-video", name: "Wan 3.0 (30s)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30], price720: 0.10, price1080: 0.20, emoji: "🌀", tier: "$$$" },
-  { id: "seedance-2.0-fast", name: "SD 2.0 Fast", durations: [5, 8, 10, 12, 15], price720: 0.121, price1080: 0.272, emoji: "🔥", tier: "$$$" },
+  // Seedance 480p HABILITADO 12-ago-2026 (854×480; vertical 480×854): la calidad de
+  // movimiento de Seedance a ~44% del precio de 720p — YouTube Super Resolution
+  // re-escala <1080p del lado del espectador. CORRECCIÓN de precios SD 2.0 Fast:
+  // el FAQ oficial de OpenRouter dice $4.20/M tokens (no 0.8× de SD 2.0) →
+  // 480p $0.0404 / 720p $0.0907 / 1080p $0.204. Verificar 1ª factura en Activity.
+  { id: "seedance-2.0-fast", name: "SD 2.0 Fast", durations: [5, 8, 10, 12, 15], price480: 0.0404, price720: 0.0907, price1080: 0.204, emoji: "🔥", tier: "$$$" },
   { id: "sora-2-pro-batch", name: "Sora Pro Batch (≤24h)", durations: [4, 8, 12, 16, 20], price720: 0.15, price1080: 0.15, emoji: "📦", tier: "$$" },
-  { id: "seedance-2.0", name: "SD 2.0", durations: [5, 8, 10, 12, 15], price720: 0.151, price1080: 0.340, emoji: "💫", tier: "$$$$" },
+  { id: "seedance-2.0", name: "SD 2.0", durations: [5, 8, 10, 12, 15], price480: 0.067, price720: 0.151, price1080: 0.340, emoji: "💫", tier: "$$$$" },
 ]
 
 
@@ -143,7 +149,7 @@ const TIER_CONFIG: Record<TierName, { label: string; emoji: string; color: strin
 // All possible durations across all models
 const ALL_DURATIONS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 20]
 
-type Resolution = "720p" | "1080p"
+type Resolution = "480p" | "720p" | "1080p"
 
 /* ── Helper: snap raw seconds to nearest standard duration ── */
 function snapToStandardDuration(rawSeconds: number): number {
@@ -239,7 +245,11 @@ interface SceneState {
 function getPrice(modelId: string, duration: number, resolution: Resolution): number {
   const m = MODEL_MAP[modelId]
   if (!m) return 0
-  const perSec = resolution === "1080p" ? m.price1080 : m.price720
+  // 480p: solo los modelos con price480 la venden; si por cualquier razón llega 480p
+  // a un modelo sin ella, se estima como 720p (el peor caso real: el worker genera 720p).
+  const perSec = resolution === "1080p" ? m.price1080
+    : resolution === "480p" ? (m.price480 ?? m.price720)
+    : m.price720
   // Modelos con escalones fijos (Sora 4/8/12/16/20; Seedance OpenRouter 5/8/10/12/15):
   // se genera el escalón SIGUIENTE hacia arriba y el export recorta — el costo real es
   // el del ESCALÓN, no el de la ranura. Antes el estimado usaba la ranura y el cobro
@@ -613,7 +623,14 @@ function SceneCard({
       <div className="px-3 pb-2 flex gap-1.5">
         <select
           value={scene.model}
-          onChange={(e) => onChange({ model: e.target.value })}
+          onChange={(e) => {
+            // Si la escena está en 480p y el nuevo modelo NO la vende, degradar a 720p
+            // para que nunca viaje una resolución inválida al backend.
+            const nm = e.target.value
+            const patch: Partial<SceneState> = { model: nm }
+            if (scene.resolution === "480p" && !MODEL_MAP[nm]?.price480) patch.resolution = "720p"
+            onChange(patch)
+          }}
           disabled={scene.status === "generating" || scene.status === "done"}
           className="flex-1 px-1.5 py-1 text-[10px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded text-white disabled:opacity-50"
         >
@@ -639,6 +656,7 @@ function SceneCard({
           disabled={scene.status === "generating" || scene.status === "done"}
           className="w-16 px-1 py-1 text-[10px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded text-white text-center disabled:opacity-50"
         >
+          {MODEL_MAP[scene.model]?.price480 !== undefined && <option value="480p">480p</option>}
           <option value="720p">720p</option>
           <option value="1080p">1080p</option>
         </select>
@@ -861,7 +879,11 @@ export const ProductionPanel = memo(function ProductionPanel({
           index: s.index,
           model,
           duration,
-          resolution: (saved?.resolution || "720p") as Resolution,
+          // 480p guardado solo revive si el modelo (posiblemente cambiado arriba) la vende
+          resolution: ((): Resolution => {
+            const r = (saved?.resolution || "720p") as Resolution
+            return r === "480p" && MODEL_MAP[model]?.price480 === undefined ? "720p" : r
+          })(),
           motionPrompt: saved?.motionPrompt || "",
           classification: saved?.classification || "",
           kbConfig: saved?.kbConfig || { ...KB_DEFAULT },
@@ -926,10 +948,15 @@ export const ProductionPanel = memo(function ProductionPanel({
         // Only apply if the global model supports this scene's duration
         const compatible = getCompatibleModels(s.duration)
         const canUseGlobal = compatible.some((m) => m.id === globalModel)
+        const appliedModel = canUseGlobal ? globalModel : s.model
+        // 480p solo si el modelo APLICADO la vende; si no, esa escena baja a 720p
+        const appliedRes: Resolution =
+          globalResolution === "480p" && MODEL_MAP[appliedModel]?.price480 === undefined
+            ? "720p" : globalResolution
         return {
           ...s,
-          model: canUseGlobal ? globalModel : s.model,
-          resolution: globalResolution,
+          model: appliedModel,
+          resolution: appliedRes,
         }
       })
     )
@@ -959,7 +986,9 @@ export const ProductionPanel = memo(function ProductionPanel({
         const model = MODEL_MAP[modelId]
         if (!model || !model.durations.includes(s.duration)) return s
         updated++
-        return { ...s, model: modelId, resolution: globalResolution }
+        const tierRes: Resolution =
+          globalResolution === "480p" && model.price480 === undefined ? "720p" : globalResolution
+        return { ...s, model: modelId, resolution: tierRes }
       })
     )
     setActiveTier(tier)
@@ -1479,6 +1508,7 @@ export const ProductionPanel = memo(function ProductionPanel({
               onChange={(e) => setGlobalResolution(e.target.value as Resolution)}
               className="px-2 py-1 text-[10px] bg-[var(--surface-2)] border border-[var(--border-default)] rounded text-white"
             >
+              <option value="480p">480p (solo Seedance)</option>
               <option value="720p">720p</option>
               <option value="1080p">1080p</option>
             </select>
