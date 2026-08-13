@@ -23,7 +23,7 @@ interface BrowserExportDialogProps {
 
 type ExportPhase = "idle" | "loading-ffmpeg" | "downloading" | "normalizing" | "merging" | "done" | "error"
 
-const XFADE_DURATION = 1 // seconds of crossfade between clips
+const XFADE_DURATION = 0 // CORTE DIRECTO (13-ago-2026, pedido de Richi: el fundido de 1s se comía 2+ segundos en videos cortos). Para reactivar fundido: 0.4
 const TARGET_FPS = 30
 const TARGET_WIDTH = 1280
 const TARGET_HEIGHT = 720
@@ -210,7 +210,7 @@ export function BrowserExportDialog({
         try { await ffmpeg.deleteFile("norm_0.mp4") } catch {}
       } else {
         // Build xfade filter chain
-        setStatusMsg(`Uniendo ${totalClips} clips con crossfade...`)
+        setStatusMsg(`Uniendo ${totalClips} clips...`)
 
         // Build input args
         const inputArgs: string[] = []
@@ -249,6 +249,7 @@ export function BrowserExportDialog({
         const filterComplex = videoFilter + ";" + audioFilter
 
         try {
+          if (XFADE_DURATION < 0.2) throw new Error("corte directo (crossfade desactivado)")
           await ffmpeg.exec([
             ...inputArgs,
             "-filter_complex", filterComplex,
@@ -261,7 +262,7 @@ export function BrowserExportDialog({
         } catch (xfadeErr) {
           // Fallback: simple concat if xfade fails
           console.warn("xfade failed, falling back to concat:", xfadeErr)
-          setStatusMsg("Crossfade falló — usando concat simple...")
+          setStatusMsg("Uniendo con corte directo...")
 
           // Write concat list
           let concatList = ""
@@ -461,7 +462,7 @@ export function BrowserExportDialog({
                 ✅ ¡Exportación completa!
               </div>
               <div className="flex items-center justify-between text-[10px] text-[var(--text-tertiary)]">
-                <span>{doneScenes.length} clips unidos con crossfade</span>
+                <span>{doneScenes.length} clips unidos (corte directo)</span>
                 <span className="font-mono">{formatTime(elapsedSec)}</span>
               </div>
 
