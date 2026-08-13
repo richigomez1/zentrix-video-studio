@@ -490,10 +490,18 @@ async function runExport(clips: SceneClip[], resolution: "720p" | "1080p", audio
   clipBlobs.fill(null)
   if (cancelled) return
 
-  // FASE 2.5: respiro de 3s al inicio y 3s al final (solo codifica 6s)
-  sendProgress("finalizing", 90, "Añadiendo respiro (3s al inicio y al final)...")
-  const padded = await addBreathingRoom(joined)
-  const gotRoom = padded !== joined
+  // FASE 2.5: respiro de 3s — DESACTIVADO 13-ago-2026: Richi resolvió la causa raíz
+  // en Burdier (el programa de voz) y la narración YA llega con su propio silencio al
+  // inicio y al final; añadir otros 3s aquí duplicaba el respiro. Para reactivarlo con
+  // audios viejos sin silencio propio: RESPIRO_EXPORT = true.
+  const RESPIRO_EXPORT = false
+  let padded = joined
+  let gotRoom = false
+  if (RESPIRO_EXPORT) {
+    sendProgress("finalizing", 90, "Añadiendo respiro (3s al inicio y al final)...")
+    padded = await addBreathingRoom(joined)
+    gotRoom = padded !== joined
+  }
   if (cancelled) return
 
   // FASE 3: narración — retrasada lo que dure la cabecera para que cuadre con el video
