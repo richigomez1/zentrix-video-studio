@@ -23,7 +23,9 @@ interface BrowserExportDialogProps {
 
 type ExportPhase = "idle" | "loading-ffmpeg" | "downloading" | "normalizing" | "merging" | "done" | "error"
 
-const XFADE_DURATION = 0 // CORTE DIRECTO (13-ago-2026, pedido de Richi: el fundido de 1s se comía 2+ segundos en videos cortos). Para reactivar fundido: 0.4
+const XFADE_MAX = 0.4 // FUNDIDO ADAPTATIVO (13-ago-2026): tope 0.4s, escalado al 10% del clip
+// más corto — clips de 4s+ → 0.4s · 2s → 0.2s · <1.5s → corte directo. Antes era 1s fijo
+// (se comía 2+ segundos en videos cortos); el corte seco total también molestaba.
 const TARGET_FPS = 30
 const TARGET_WIDTH = 1280
 const TARGET_HEIGHT = 720
@@ -218,21 +220,24 @@ export function BrowserExportDialog({
           inputArgs.push("-i", `norm_${i}.mp4`)
         }
 
+        // Fundido ADAPTATIVO: 10% del clip más corto, tope XFADE_MAX
+        const minClipDur = Math.min(...validScenes.map((s) => s.duration || 5))
+        const xfadeDur = Math.round(Math.min(XFADE_MAX, minClipDur * 0.1) * 100) / 100
+
         // Build video xfade chain
-        // [0:v][1:v]xfade=transition=fade:duration=1:offset=O0[v01];
-        // [v01][2:v]xfade=transition=fade:duration=1:offset=O1[v012]; ...
+        // [0:v][1:v]xfade=transition=fade:duration=D:offset=O0[v01]; ...
         let videoFilter = ""
         let audioFilter = ""
         let cumulativeOffset = 0
 
         for (let i = 0; i < totalClips - 1; i++) {
           const clipDur = validScenes[i].duration
-          const offset = cumulativeOffset + clipDur - XFADE_DURATION
+          const offset = cumulativeOffset + clipDur - xfadeDur
           const inLabel = i === 0 ? `[${i}:v]` : `[v${i}]`
           const nextLabel = `[${i + 1}:v]`
           const outLabel = i === totalClips - 2 ? "[vout]" : `[v${i + 1}]`
 
-          videoFilter += `${inLabel}${nextLabel}xfade=transition=fade:duration=${XFADE_DURATION}:offset=${offset.toFixed(2)}${outLabel}`
+          videoFilter += `${inLabel}${nextLabel}xfade=transition=fade:duration=${xfadeDur}:offset=${offset.toFixed(2)}${outLabel}`
           if (i < totalClips - 2) videoFilter += ";"
 
           // Audio crossfade chain
@@ -240,7 +245,7 @@ export function BrowserExportDialog({
           const aNextLabel = `[${i + 1}:a]`
           const aOutLabel = i === totalClips - 2 ? "[aout]" : `[a${i + 1}]`
 
-          audioFilter += `${aInLabel}${aNextLabel}acrossfade=d=${XFADE_DURATION}:c1=tri:c2=tri${aOutLabel}`
+          audioFilter += `${aInLabel}${aNextLabel}acrossfade=d=${xfadeDur}:c1=tri:c2=tri${aOutLabel}`
           if (i < totalClips - 2) audioFilter += ";"
 
           cumulativeOffset = offset
@@ -249,7 +254,7 @@ export function BrowserExportDialog({
         const filterComplex = videoFilter + ";" + audioFilter
 
         try {
-          if (XFADE_DURATION < 0.2) throw new Error("corte directo (crossfade desactivado)")
+          if (xfadeDur < 0.15) throw new Error(`corte directo (clips muy cortos: ${minClipDur}s)`)
           await ffmpeg.exec([
             ...inputArgs,
             "-filter_complex", filterComplex,
@@ -462,7 +467,7 @@ export function BrowserExportDialog({
                 ✅ ¡Exportación completa!
               </div>
               <div className="flex items-center justify-between text-[10px] text-[var(--text-tertiary)]">
-                <span>{doneScenes.length} clips unidos (corte directo)</span>
+                <span>{doneScenes.length} clips unidos</span>
                 <span className="font-mono">{formatTime(elapsedSec)}</span>
               </div>
 
