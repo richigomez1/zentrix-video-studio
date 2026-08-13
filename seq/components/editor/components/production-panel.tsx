@@ -28,6 +28,9 @@ const MODELS: ModelInfo[] = [
   // ── ORDEN POR PRECIO 720p, de barato a caro ──
   { id: "ken-burns", name: "Ken Burns", durations: [4, 5, 6, 8, 10, 12, 15], price720: 0, price1080: 0, emoji: "🎞", tier: "Gratis" },
   { id: "pruna-video-draft", name: "PrunaAI Draft", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.005, price1080: 0.01, emoji: "⚡", tier: "¢" },
+  // SD 2.0 Mini (13-ago-2026, lanzado ayer): el 480p MÁS BARATO del arsenal, con
+  // audio incluido. SOLO 480p/720p. Escalones 4-15 con snap ↑. ⚠️ posible precio promo.
+  { id: "seedance-2.0-mini", name: "SD 2.0 Mini", durations: [4, 5, 8, 10, 12, 15], price480: 0.0134, price720: 0.0302, price1080: 0.0302, resolutions: ["480p", "720p"], emoji: "🪶", tier: "¢" },
   // ── Wan 2.x — API DIRECTA DashScope (12-ago-2026). Precios QwenCloud verificados;
   // el 1er cobro real por DashScope puede diferir: verificar factura. Todos i2v.
   // wan2.2: clips FIJOS de 5s (escenas ≤5s; el export recorta) — el validador barato.
@@ -205,7 +208,7 @@ function getCompatibleModels(duration: number): ModelInfo[] {
     // duración HACIA ARRIBA a su escalón (5/8/10/12/15) y el export recorta a la
     // ranura exacta. Una escena de 6s se genera de 8s y se recorta — nunca queda
     // bloqueada. (SD 1.0 va por Replicate, SIN snap en el worker: mantiene lista exacta.)
-    if (m.id === "seedance-2.0-fast" || m.id === "seedance-2.0") {
+    if (m.id.startsWith("seedance-2.0")) {
       return duration <= m.durations[m.durations.length - 1]
     }
     // Wan 2.2: clip FIJO de 5s (la API no acepta duration) → compatible con
@@ -293,7 +296,7 @@ function getPrice(modelId: string, duration: number, resolution: Resolution): nu
   // el del ESCALÓN, no el de la ranura. Antes el estimado usaba la ranura y el cobro
   // real salía más alto (una escena de 6s se factura como 8s).
   let billed = duration
-  if (modelId.startsWith("sora") || modelId === "seedance-2.0-fast" || modelId === "seedance-2.0"
+  if (modelId.startsWith("sora") || modelId.startsWith("seedance-2.0")
       || modelId.startsWith("wan2.2-") || modelId === "wan2.5-i2v-preview") {
     billed = m.durations.find((d) => duration <= d) ?? m.durations[m.durations.length - 1]
   }
