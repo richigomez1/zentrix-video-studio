@@ -1121,10 +1121,12 @@ export const ProductionPanel = memo(function ProductionPanel({
     }
   }, [chapterId, briefing])
 
-  const handleAutoPrepare = useCallback(async () => {
+  const handleAutoPrepare = useCallback(async (fastMode: boolean = false) => {
     if (!chapterId) return
     setIsAutoPreparing(true)
-    setStatusMsg("🤖 Analizando cada imagen y escribiendo motion prompts...")
+    setStatusMsg(fastMode
+      ? "⚡ Escribiendo motion prompts en modo rápido (sin visión)..."
+      : "🤖 Analizando cada imagen y escribiendo motion prompts...")
 
     try {
       const result = await apiFetch(
@@ -1132,6 +1134,7 @@ export const ProductionPanel = memo(function ProductionPanel({
         {
           method: "POST",
           body: JSON.stringify({
+            fast_mode: fastMode,   // ⚡ botón Rápido: sin visión, prompts cortos (solo Image Studio)
             default_duration: 10,
             default_model: globalModel,
             default_resolution: globalResolution,
@@ -1653,7 +1656,7 @@ export const ProductionPanel = memo(function ProductionPanel({
           </button>
 
           <button
-            onClick={handleAutoPrepare}
+            onClick={() => handleAutoPrepare(false)}
             disabled={isAutoPreparing || isBatchGenerating}
             className="px-4 py-2 text-xs font-medium text-white bg-purple-600 hover:bg-purple-500 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-2"
           >
@@ -1662,6 +1665,17 @@ export const ProductionPanel = memo(function ProductionPanel({
             ) : (
               <>🤖 Auto-preparar prompts</>
             )}
+          </button>
+
+          {/* ⚡ Modo rápido (13-ago-2026, pedido de Richi): sin visión, prompts cortos,
+              ~3-5× más veloz. El backend lo ignora en capítulos de Storyboard. */}
+          <button
+            onClick={() => handleAutoPrepare(true)}
+            disabled={isAutoPreparing || isBatchGenerating}
+            title="Prompts cortos SIN analizar las imágenes — ideal para contenido calmado (meditación/sleep). 3-5× más rápido."
+            className="px-4 py-2 text-xs font-medium text-white bg-amber-600 hover:bg-amber-500 rounded-lg transition-colors disabled:opacity-40 flex items-center gap-2"
+          >
+            ⚡ Rápido
           </button>
 
           <button
