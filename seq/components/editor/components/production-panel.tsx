@@ -228,6 +228,15 @@ function getCompatibleModels(duration: number): ModelInfo[] {
     if (m.id === "minimax-h3") {
       return duration <= m.durations[m.durations.length - 1]
     }
+    // Omni Flash (17-ago-2026): trato Sora. El worker redondea la ranura HACIA
+    // ARRIBA a su escalón (4/6/8) y para ranuras >8s genera 8s (su máximo): el
+    // export recorta el sobrante o RELLENA CON FOTOGRAMA CONGELADO el faltante
+    // (aviso ■■ CONGELADOS). En contenido ambiental/meditación la cola congelada
+    // es prácticamente invisible → compatible con CUALQUIER duración.
+    // Antes el panel bloqueaba Omni en escenas de 7/9/12s (reporte de Richi).
+    if (m.id === "omni-flash") {
+      return true
+    }
     return m.durations.includes(duration)
   })
 }
@@ -309,6 +318,12 @@ function getPrice(modelId: string, duration: number, resolution: Resolution): nu
   // arriba con límites 2-30 — igual que clamp_seconds() de wan3_video.py.
   if (modelId === "wan3.0-video") {
     billed = Math.max(2, Math.min(30, Math.ceil(duration - 0.01)))
+  }
+  // Omni Flash (17-ago-2026): se factura el ESCALÓN generado (4/6/8) con TOPE de 8s —
+  // una ranura de 12s genera un clip de 8s (el resto lo rellena congelado el export),
+  // así que cuesta 8×$0.10, no 12×. Igual que snap_seconds() de omni_video.py.
+  if (modelId === "omni-flash") {
+    billed = m.durations.find((d) => duration <= d) ?? 8
   }
   return perSec * billed
 }
