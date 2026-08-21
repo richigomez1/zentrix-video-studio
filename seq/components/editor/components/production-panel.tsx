@@ -434,12 +434,19 @@ function SceneCard({
                 onMouseLeave={(e) => { const v = e.target as HTMLVideoElement; v.pause(); v.currentTime = 0 }}
               />
               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center gap-2">
-                <button
+                {/* Enlace REAL (no window.open): los bloqueadores de popups matan window.open
+                    en silencio — al editor del equipo no le abría nada (18-ago-2026). Un <a>
+                    nativo con target=_blank jamás se bloquea, y desde la pestaña puede descargar. */}
+                <a
                   className="hidden group-hover:block text-white text-[10px] font-bold bg-black/60 px-2 py-1 rounded cursor-pointer hover:bg-black/80"
-                  onClick={() => window.open(scene.videoUrl!, '_blank')}
+                  style={{ textDecoration: "none" }}
+                  href={scene.videoUrl!}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => e.stopPropagation()}
                 >
                   ▶ Ver
-                </button>
+                </a>
                 <button
                   className="hidden group-hover:block text-white text-[10px] font-bold bg-red-600/80 px-2 py-1 rounded cursor-pointer hover:bg-red-500"
                   onClick={() => onDelete()}
