@@ -56,7 +56,10 @@ const MODELS: ModelInfo[] = [
   // Duración: CUALQUIER entero 2-30 SIN escalones (se factura el segundo exacto).
   // Hasta 30s por clip — el único junto a Ken Burns que pasa de 20s. 1080p cuesta 2×.
   // El facturado real por video sale en el log [WAN3 ✅ ... facturado Ns] de Render.
-  { id: "wan3.0-video", name: "Wan 3.0 (30s)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30], price720: 0.10, price1080: 0.20, emoji: "🌀", tier: "$$$" },
+  // ⚠️ PRECIO PROMOCIONAL Wan 3.0 (verificado en consola DashScope 21-ago-2026): -30% sobre
+  // lista ($0.10/$0.20). Si la promo termina sin aviso, los estimados quedarán CORTOS un 43%
+  // hasta actualizar estas dos cifras — vigilar la primera factura de cada mes.
+  { id: "wan3.0-video", name: "Wan 3.0 (30s)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30], price720: 0.07, price1080: 0.14, emoji: "🌀", tier: "$$" },
   // Seedance 480p HABILITADO 12-ago-2026 (854×480; vertical 480×854): la calidad de
   // movimiento de Seedance a ~44% del precio de 720p — YouTube Super Resolution
   // re-escala <1080p del lado del espectador. CORRECCIÓN de precios SD 2.0 Fast:
