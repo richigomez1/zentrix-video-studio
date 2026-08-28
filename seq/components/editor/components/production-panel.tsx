@@ -50,7 +50,8 @@ const MODELS: ModelInfo[] = [
   // Audio nativo sí ([SFX]). El costo real facturado sale en el log [MMAX 💰] de Render.
   { id: "minimax-h3", name: "MiniMax H3 (2K)", durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price720: 0.08, price1080: 0.13, emoji: "🐉", tier: "$$" },
   { id: "veo-3.1-fast-generate-preview", name: "Veo Fast", durations: [5, 8], price720: 0.10, price1080: 0.12, emoji: "🚀", tier: "$$$" },
-  { id: "omni-flash", name: "Omni Flash", durations: [4, 6, 8], price720: 0.10, price1080: 0.18, emoji: "🌟", tier: "$$$" },
+  // Omni 1.1 (28-ago-2026): duración CONTINUA 3-10s por generación (modelo estable gemini-omni-1.1-flash; mismo precio).
+  { id: "omni-flash", name: "Omni 1.1 Flash", durations: [3, 4, 5, 6, 7, 8, 9, 10], price720: 0.10, price1080: 0.18, emoji: "🌟", tier: "$$$" },
   { id: "sora-2", name: "Sora 2", durations: [4, 8, 12, 16, 20], price720: 0.10, price1080: 0.10, emoji: "🎦", tier: "$$$" },
   // Wan 3.0 — API DIRECTA DashScope/Alibaba (no OpenRouter). Audio nativo sí ([SFX]).
   // Duración: CUALQUIER entero 2-30 SIN escalones (se factura el segundo exacto).
@@ -326,7 +327,9 @@ function getPrice(modelId: string, duration: number, resolution: Resolution): nu
   // una ranura de 12s genera un clip de 8s (el resto lo rellena congelado el export),
   // así que cuesta 8×$0.10, no 12×. Igual que snap_seconds() de omni_video.py.
   if (modelId === "omni-flash") {
-    billed = m.durations.find((d) => duration <= d) ?? 8
+    // Omni 1.1: se factura el SEGUNDO ENTERO exacto con límites 3-10 (una escena de 7s
+    // cuesta 7×; ranuras >10s generan 10s y el export rellena congelado el resto).
+    billed = Math.max(3, Math.min(10, Math.ceil(duration - 0.01)))
   }
   return perSec * billed
 }
