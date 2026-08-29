@@ -953,10 +953,15 @@ export const ProductionPanel = memo(function ProductionPanel({
           // La resolución guardada se ajusta a las que el modelo (posiblemente
           // cambiado arriba) realmente vende
           resolution: clampResToModel(model, (saved?.resolution || "720p") as Resolution),
-          motionPrompt: saved?.motionPrompt || "",
-          classification: saved?.classification || "",
+          // RESTAURACIÓN DESDE EL SERVIDOR (28-ago-2026, bug de Richi): el backend SIEMPRE
+          // guardó los prompts del director en el capítulo (motion_prompt_video), pero el
+          // panel solo leía localStorage — al re-analizar o abrir desde otra PC, salían
+          // vacíos y había que pagar Auto-preparar otra vez. localStorage (ediciones
+          // locales recientes) gana; el servidor es la base durable.
+          motionPrompt: saved?.motionPrompt || (s as any).motion_prompt_video || "",
+          classification: saved?.classification || (s as any).scene_type || "",
           kbConfig: saved?.kbConfig || { ...KB_DEFAULT },
-          status: s.video_url ? "done" as const : "pending" as const,
+          status: s.video_url ? "done" as const : ((saved?.motionPrompt || (s as any).motion_prompt_video) ? "ready" as const : "pending" as const),
           videoUrl: s.video_url || null,
           errorMsg: "",
           volume: saved?.volume ?? 10,
