@@ -30,6 +30,9 @@ const MODELS: ModelInfo[] = [
   { id: "pruna-video-draft", name: "PrunaAI Draft", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.005, price1080: 0.01, emoji: "⚡", tier: "¢" },
   // SD 2.0 Mini (13-ago-2026, lanzado ayer): el 480p MÁS BARATO del arsenal, con
   // audio incluido. SOLO 480p/720p. Escalones 4-15 con snap ↑. ⚠️ posible precio promo.
+  // Doc oficial OpenRouter (30-ago-2026): Mini genera 4-15s. El caso "pedi 15, llego 10"
+  // quedo bajo vigilancia del worker (log REQUESTED vs DELIVERED) — si el proveedor
+  // vuelve a entregar corto, la evidencia sale en rojo en Render para reclamar.
   { id: "seedance-2.0-mini", name: "SD 2.0 Mini", durations: [4, 5, 8, 10, 12, 15], price480: 0.0134, price720: 0.0302, price1080: 0.0302, resolutions: ["480p", "720p"], emoji: "🪶", tier: "¢" },
   // ── Wan 2.x — API DIRECTA DashScope (12-ago-2026). Precios QwenCloud verificados;
   // el 1er cobro real por DashScope puede diferir: verificar factura. Todos i2v.
@@ -239,7 +242,10 @@ function getCompatibleModels(duration: number): ModelInfo[] {
     // es prácticamente invisible → compatible con CUALQUIER duración.
     // Antes el panel bloqueaba Omni en escenas de 7/9/12s (reporte de Richi).
     if (m.id === "omni-flash") {
-      return true
+      // REGLA DE LA CASA (30-ago-2026): Omni 1.1 genera max 10s por clip. Ranuras
+      // mayores NO son compatibles: el modelo debe producir los segundos COMPLETOS
+      // de la escena o no se ofrece. Nada de rellenos silenciosos.
+      return duration <= 10
     }
     return m.durations.includes(duration)
   })
