@@ -57,7 +57,7 @@ const MODELS: ModelInfo[] = [
   // — más barato que MiniMax directo ($0.08) y con 50% off hasta el 24-sep (el
   // estimado usa precio de lista; la promo llega como sorpresa buena en la factura).
   // Duración: entero 5-15 SIN escalones; audio nativo sí ([SFX]); NO acepta audio de entrada.
-  { id: "pruna-video-2-pro", name: "P-Video 2 Pro (768p)", durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price720: 0.075, price1080: 0.075, emoji: "💎", tier: "$$" },
+  { id: "pruna-video-2-pro", name: "P-Video 2 Pro", durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price480: 0.04, price720: 0.075, price1080: 0.075, resolutions: ["480p", "720p"], emoji: "💎", tier: "$$" },
   { id: "minimax-h3", name: "MiniMax H3 (2K)", durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price720: 0.08, price1080: 0.13, emoji: "🐉", tier: "$$" },
   { id: "veo-3.1-fast-generate-preview", name: "Veo Fast", durations: [5, 8], price720: 0.10, price1080: 0.12, emoji: "🚀", tier: "$$$" },
   // Omni 1.1 (28-ago-2026): duración CONTINUA 3-10s por generación (modelo estable gemini-omni-1.1-flash; mismo precio).
