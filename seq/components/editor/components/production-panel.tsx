@@ -28,7 +28,7 @@ const MODELS: ModelInfo[] = [
   // ── ORDEN POR PRECIO 720p, de barato a caro ──
   { id: "ken-burns", name: "Ken Burns", durations: [4, 5, 6, 8, 10, 12, 15], price720: 0, price1080: 0, emoji: "🎞", tier: "Gratis" },
   // P-Video-2 (18-sep-2026): sustituye a PrunaAI v1. 1-20s continuos, audio incluido, ultimo frame opcional.
-  { id: "pruna-video-draft", name: "P-Video-2 Draft", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.015, price1080: 0.03, emoji: "⚡", tier: "¢" },
+  { id: "pruna-video-2-draft", name: "P-Video-2 Draft", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.015, price1080: 0.03, emoji: "⚡", tier: "¢" },
   // SD 2.0 Mini (13-ago-2026, lanzado ayer): el 480p MÁS BARATO del arsenal, con
   // audio incluido. SOLO 480p/720p. Escalones 4-15 con snap ↑. ⚠️ posible precio promo.
   // Doc oficial OpenRouter (30-ago-2026): Mini genera 4-15s. El caso "pedi 15, llego 10"
@@ -42,7 +42,7 @@ const MODELS: ModelInfo[] = [
   { id: "wan2.2-i2v-plus", name: "Wan 2.2 Plus (5s)", durations: [5], price480: 0.02, price720: 0.10, price1080: 0.10, resolutions: ["480p", "1080p"], emoji: "🍃", tier: "$" },
   // wan2.6-flash SIN audio: 1080p a $0.0375/s — el competidor directo de Pruna Normal.
   { id: "wan2.6-i2v-flash", name: "Wan 2.6 Flash (sin audio)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15], price720: 0.025, price1080: 0.0375, resolutions: ["720p", "1080p"], emoji: "🌪", tier: "$" },
-  { id: "pruna-video", name: "P-Video-2", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.025, price1080: 0.05, emoji: "🎬", tier: "$" },
+  { id: "pruna-video-2", name: "P-Video-2", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.025, price1080: 0.05, emoji: "🎬", tier: "$" },
   { id: "wan2.6-i2v-flash-audio", name: "Wan 2.6 Flash (audio)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15], price720: 0.05, price1080: 0.075, resolutions: ["720p", "1080p"], emoji: "🌪", tier: "$$" },
   // wan2.5: escalones 5/10 con snap ↑ (patrón Sora); audio nativo automático.
   { id: "wan2.5-i2v-preview", name: "Wan 2.5 (10s)", durations: [5, 10], price480: 0.05, price720: 0.10, price1080: 0.15, emoji: "🌊", tier: "$$$" },
@@ -52,6 +52,12 @@ const MODELS: ModelInfo[] = [
   // "720p" del selector = 768P ($0.08/s) y "1080p" = 2K 2560×1440 ($0.13/s).
   // Duración: CUALQUIER entero 4-15, SIN escalones (6s se genera y factura de 6s).
   // Audio nativo sí ([SFX]). El costo real facturado sale en el log [MMAX 💰] de Render.
+  // P-Video-2-Pro (18-sep-2026) = MiniMax H3 servido vía PrunaAI: SOLO 768p quality.
+  // Ambas opciones del selector (720p/1080p) se sirven y cobran como 768p a $0.075/s
+  // — más barato que MiniMax directo ($0.08) y con 50% off hasta el 24-sep (el
+  // estimado usa precio de lista; la promo llega como sorpresa buena en la factura).
+  // Duración: entero 5-15 SIN escalones; audio nativo sí ([SFX]); NO acepta audio de entrada.
+  { id: "pruna-video-2-pro", name: "P-Video 2 Pro (768p)", durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price720: 0.075, price1080: 0.075, emoji: "💎", tier: "$$" },
   { id: "minimax-h3", name: "MiniMax H3 (2K)", durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price720: 0.08, price1080: 0.13, emoji: "🐉", tier: "$$" },
   { id: "veo-3.1-fast-generate-preview", name: "Veo Fast", durations: [5, 8], price720: 0.10, price1080: 0.12, emoji: "🚀", tier: "$$$" },
   // Omni 1.1 (28-ago-2026): duración CONTINUA 3-10s por generación (modelo estable gemini-omni-1.1-flash; mismo precio).
@@ -107,21 +113,21 @@ const TIER_CONFIG: Record<TierName, { label: string; emoji: string; color: strin
     label: "Económico",
     emoji: "🟢",
     color: "bg-emerald-600 hover:bg-emerald-500",
-    description: "PrunaAI Draft — $0.005/seg",
+    description: "P-Video-2 Draft — $0.015/seg",
     mapping: {
-      3: "pruna-video-draft",
-      4: "pruna-video-draft",
-      5: "pruna-video-draft",
-      6: "pruna-video-draft",
-      7: "pruna-video-draft",
-      8: "pruna-video-draft",
-      9: "pruna-video-draft",
-      10: "pruna-video-draft",
-      11: "pruna-video-draft",
-      12: "pruna-video-draft",
-      13: "pruna-video-draft",
-      14: "pruna-video-draft",
-      15: "pruna-video-draft",
+      3: "pruna-video-2-draft",
+      4: "pruna-video-2-draft",
+      5: "pruna-video-2-draft",
+      6: "pruna-video-2-draft",
+      7: "pruna-video-2-draft",
+      8: "pruna-video-2-draft",
+      9: "pruna-video-2-draft",
+      10: "pruna-video-2-draft",
+      11: "pruna-video-2-draft",
+      12: "pruna-video-2-draft",
+      13: "pruna-video-2-draft",
+      14: "pruna-video-2-draft",
+      15: "pruna-video-2-draft",
     },
   },
   equilibrado: {
@@ -130,19 +136,19 @@ const TIER_CONFIG: Record<TierName, { label: string; emoji: string; color: strin
     color: "bg-amber-600 hover:bg-amber-500",
     description: "PrunaAI Normal — $0.02/seg",
     mapping: {
-      3: "pruna-video",
-      4: "pruna-video",
-      5: "pruna-video",
-      6: "pruna-video",
-      7: "pruna-video",
-      8: "pruna-video",
-      9: "pruna-video",
-      10: "pruna-video",
-      11: "pruna-video",
-      12: "pruna-video",
-      13: "pruna-video",
-      14: "pruna-video",
-      15: "pruna-video",
+      3: "pruna-video-2",
+      4: "pruna-video-2",
+      5: "pruna-video-2",
+      6: "pruna-video-2",
+      7: "pruna-video-2",
+      8: "pruna-video-2",
+      9: "pruna-video-2",
+      10: "pruna-video-2",
+      11: "pruna-video-2",
+      12: "pruna-video-2",
+      13: "pruna-video-2",
+      14: "pruna-video-2",
+      15: "pruna-video-2",
     },
   },
   balanceado: {
@@ -151,19 +157,19 @@ const TIER_CONFIG: Record<TierName, { label: string; emoji: string; color: strin
     color: "bg-orange-600 hover:bg-orange-500",
     description: "PrunaAI + Veo Lite — mejor calidad",
     mapping: {
-      3: "pruna-video",
-      4: "pruna-video",
+      3: "pruna-video-2",
+      4: "pruna-video-2",
       5: "veo-3.1-lite-generate-preview",
-      6: "pruna-video",
-      7: "pruna-video",
+      6: "pruna-video-2",
+      7: "pruna-video-2",
       8: "veo-3.1-lite-generate-preview",
-      9: "pruna-video",
-      10: "pruna-video",
-      11: "pruna-video",
-      12: "pruna-video",
-      13: "pruna-video",
-      14: "pruna-video",
-      15: "pruna-video",
+      9: "pruna-video-2",
+      10: "pruna-video-2",
+      11: "pruna-video-2",
+      12: "pruna-video-2",
+      13: "pruna-video-2",
+      14: "pruna-video-2",
+      15: "pruna-video-2",
     },
   },
   premium: {
@@ -234,6 +240,10 @@ function getCompatibleModels(duration: number): ModelInfo[] {
     // HACIA ARRIBA (clamp 4-15) y el export recorta a la ranura exacta — una escena
     // de 3s se genera de 4s y se recorta. Compatible con cualquier duración ≤ 15.
     if (m.id === "minimax-h3") {
+      return duration <= m.durations[m.durations.length - 1]
+    }
+    // P-Video-2-Pro: entero 5-15; escenas <5s se generan de 5s y el export recorta.
+    if (m.id === "pruna-video-2-pro") {
       return duration <= m.durations[m.durations.length - 1]
     }
     // Omni Flash (17-ago-2026): trato Sora. El worker redondea la ranura HACIA
@@ -324,6 +334,11 @@ function getPrice(modelId: string, duration: number, resolution: Resolution): nu
   // arriba con límites 4-15 — igual que clamp_seconds() del worker.
   if (modelId === "minimax-h3") {
     billed = Math.max(4, Math.min(15, Math.ceil(duration - 0.01)))
+  }
+  // P-Video-2-Pro factura el SEGUNDO ENTERO exacto con límites 5-15 — igual que
+  // el clamp del worker (una escena de 3s se genera de 5s y el export recorta).
+  if (modelId === "pruna-video-2-pro") {
+    billed = Math.max(5, Math.min(15, Math.ceil(duration - 0.01)))
   }
   // Wan 3.0 factura el SEGUNDO ENTERO exacto (sin escalones): redondeo hacia
   // arriba con límites 2-30 — igual que clamp_seconds() de wan3_video.py.
@@ -807,7 +822,7 @@ export const ProductionPanel = memo(function ProductionPanel({
     setDirectorBusy(true)
     try {
       const r = await apiFetch(`/api/storyboard/chapters/${chapterId}/video-director/start`, {
-        method: "POST", body: JSON.stringify({ model: globalModel || "pruna-video-draft", resolution: globalResolution }) })
+        method: "POST", body: JSON.stringify({ model: globalModel || "pruna-video-2-draft", resolution: globalResolution }) })
       setStatusMsg(`🎥 Director en marcha — arranca en E${r.starts_at_scene}/${r.total_scenes}`)
     } catch (e: any) { setStatusMsg(`❌ ${e.message || "Error al arrancar el director"}`) }
     finally { setDirectorBusy(false) }
@@ -942,7 +957,7 @@ export const ProductionPanel = memo(function ProductionPanel({
           : 8
         const duration = snapToStandardDuration(rawDuration)
         const compatible = getCompatibleModels(duration)
-        const defaultModel = compatible.find((m) => m.id === "pruna-video-draft") ? "pruna-video-draft" : compatible.find((m) => m.id === "ken-burns") ? "ken-burns" : compatible[0]?.id || "ken-burns"
+        const defaultModel = compatible.find((m) => m.id === "pruna-video-2-draft") ? "pruna-video-2-draft" : compatible.find((m) => m.id === "ken-burns") ? "ken-burns" : compatible[0]?.id || "ken-burns"
 
         // Restore saved config if available
         const saved = savedMap[s.index]
