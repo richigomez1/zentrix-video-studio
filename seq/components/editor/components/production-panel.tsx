@@ -27,7 +27,8 @@ interface ModelInfo {
 const MODELS: ModelInfo[] = [
   // ── ORDEN POR PRECIO 720p, de barato a caro ──
   { id: "ken-burns", name: "Ken Burns", durations: [4, 5, 6, 8, 10, 12, 15], price720: 0, price1080: 0, emoji: "🎞", tier: "Gratis" },
-  { id: "pruna-video-draft", name: "PrunaAI Draft", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.005, price1080: 0.01, emoji: "⚡", tier: "¢" },
+  // P-Video-2 (18-sep-2026): sustituye a PrunaAI v1. 1-20s continuos, audio incluido, ultimo frame opcional.
+  { id: "pruna-video-draft", name: "P-Video-2 Draft", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.015, price1080: 0.03, emoji: "⚡", tier: "¢" },
   // SD 2.0 Mini (13-ago-2026, lanzado ayer): el 480p MÁS BARATO del arsenal, con
   // audio incluido. SOLO 480p/720p. Escalones 4-15 con snap ↑. ⚠️ posible precio promo.
   // Doc oficial OpenRouter (30-ago-2026): Mini genera 4-15s. El caso "pedi 15, llego 10"
@@ -41,7 +42,7 @@ const MODELS: ModelInfo[] = [
   { id: "wan2.2-i2v-plus", name: "Wan 2.2 Plus (5s)", durations: [5], price480: 0.02, price720: 0.10, price1080: 0.10, resolutions: ["480p", "1080p"], emoji: "🍃", tier: "$" },
   // wan2.6-flash SIN audio: 1080p a $0.0375/s — el competidor directo de Pruna Normal.
   { id: "wan2.6-i2v-flash", name: "Wan 2.6 Flash (sin audio)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15], price720: 0.025, price1080: 0.0375, resolutions: ["720p", "1080p"], emoji: "🌪", tier: "$" },
-  { id: "pruna-video", name: "PrunaAI", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.02, price1080: 0.04, emoji: "🎬", tier: "$" },
+  { id: "pruna-video", name: "P-Video-2", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.025, price1080: 0.05, emoji: "🎬", tier: "$" },
   { id: "wan2.6-i2v-flash-audio", name: "Wan 2.6 Flash (audio)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15], price720: 0.05, price1080: 0.075, resolutions: ["720p", "1080p"], emoji: "🌪", tier: "$$" },
   // wan2.5: escalones 5/10 con snap ↑ (patrón Sora); audio nativo automático.
   { id: "wan2.5-i2v-preview", name: "Wan 2.5 (10s)", durations: [5, 10], price480: 0.05, price720: 0.10, price1080: 0.15, emoji: "🌊", tier: "$$$" },
