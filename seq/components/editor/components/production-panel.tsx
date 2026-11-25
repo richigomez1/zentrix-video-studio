@@ -517,7 +517,7 @@ function SceneCard({
           ) : scene.status === "error" ? (
             <div className="text-center px-2">
               <div className="text-lg">❌</div>
-              <div className="text-[8px] text-red-400 mt-1 line-clamp-2">{scene.errorMsg || "Error"}</div>
+              <div className="text-[8px] text-red-400 mt-1 line-clamp-3 cursor-help" title={scene.errorMsg || "Error"}>{scene.errorMsg || "Error"}</div>
             </div>
           ) : (
             <div className="text-center">
@@ -1548,7 +1548,9 @@ export const ProductionPanel = memo(function ProductionPanel({
               return { ...s, status: "done" as const, videoUrl: url }
             }
             if (status === "error") {
-              return { ...s, status: "error" as const, errorMsg: vid.error_message || "Error de generación" }
+              // (25-nov-2026) El backend manda el motivo en `veo_error` (no `error_message`): antes
+              // esta ruta nunca lo encontraba y la tarjeta decia solo "Error de generación".
+              return { ...s, status: "error" as const, errorMsg: vid.veo_error || vid.error_message || "Error de generación" }
             }
             hasGenerating = true
             return s
