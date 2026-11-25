@@ -27,14 +27,14 @@ interface ModelInfo {
 const MODELS: ModelInfo[] = [
   // ── ORDEN POR PRECIO 720p, de barato a caro ──
   { id: "ken-burns", name: "Ken Burns", durations: [4, 5, 6, 8, 10, 12, 15], price720: 0, price1080: 0, emoji: "🎞", tier: "Gratis" },
+  // TBC Mischief 1 (25-nov-2026) via OpenRouter: el MAS BARATO de pago. Ficha oficial
+  // (captura de Richi): $0.005/s a 480p y $0.01/s a 720p. LIMITES: solo clips de 3 y 5s
+  // (escenas de mas de 5s no lo pueden usar), solo horizontal 16:9 (en capitulos
+  // verticales el backend lo rechaza con aviso), solo imagen→video, sin 1080p, sin audio.
+  // Una escena de 4s se genera de 5s y el export recorta: se cobra el escalon (5s).
+  { id: "mischief-1", name: "Mischief 1 (≤5s · sin audio · solo 16:9)", durations: [3, 5], price480: 0.005, price720: 0.01, price1080: 0.01, resolutions: ["480p", "720p"], emoji: "🧪", tier: "¢" },
   // P-Video-2 (18-sep-2026): sustituye a PrunaAI v1. 1-20s continuos, audio incluido, ultimo frame opcional.
   { id: "pruna-video-2-draft", name: "P-Video-2 Draft", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.015, price1080: 0.03, emoji: "⚡", tier: "¢" },
-  // SD 2.0 Mini (13-ago-2026, lanzado ayer): el 480p MÁS BARATO del arsenal, con
-  // audio incluido. SOLO 480p/720p. Escalones 4-15 con snap ↑. ⚠️ posible precio promo.
-  // Doc oficial OpenRouter (30-ago-2026): Mini genera 4-15s. El caso "pedi 15, llego 10"
-  // quedo bajo vigilancia del worker (log REQUESTED vs DELIVERED) — si el proveedor
-  // vuelve a entregar corto, la evidencia sale en rojo en Render para reclamar.
-  { id: "seedance-2.0-mini", name: "SD 2.0 Mini", durations: [4, 5, 8, 10, 12, 15], price480: 0.0134, price720: 0.0302, price1080: 0.0302, resolutions: ["480p", "720p"], emoji: "🪶", tier: "¢" },
   // ── Wan 2.x — API DIRECTA DashScope (12-ago-2026). Precios QwenCloud verificados;
   // el 1er cobro real por DashScope puede diferir: verificar factura. Todos i2v.
   // wan2.2: clips FIJOS de 5s (escenas ≤5s; el export recorta) — el validador barato.
@@ -43,10 +43,19 @@ const MODELS: ModelInfo[] = [
   // wan2.6-flash SIN audio: 1080p a $0.0375/s — el competidor directo de Pruna Normal.
   { id: "wan2.6-i2v-flash", name: "Wan 2.6 Flash (sin audio)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15], price720: 0.025, price1080: 0.0375, resolutions: ["720p", "1080p"], emoji: "🌪", tier: "$" },
   { id: "pruna-video-2", name: "P-Video-2", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.025, price1080: 0.05, emoji: "🎬", tier: "$" },
+  // (25-nov-2026) Tabla oficial de PrunaAI (capturas de Richi): P-Video 2 Pro tiene 3 modos.
+  // "Pro Economico" = modo cost: el MISMO modelo y resolucion a un tercio del precio
+  // (480p $0.01 · 768p $0.025), pensado para cuando no hay prisa. El "P-Video 2 Pro" de
+  // mas abajo sigue en modo quality (480p $0.04 · 768p $0.075), sin cambio.
+  { id: "pruna-video-2-pro-cost", name: "P-Video 2 Pro Económico", durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price480: 0.01, price720: 0.025, price1080: 0.025, resolutions: ["480p", "720p"], emoji: "🐢", tier: "¢" },
+  // (25-nov-2026) Hermanos baratos de MiniMax H3 (pagina oficial de precios, captura de
+  // Richi): misma API directa, 4-15s, audio nativo. Sin 2K: solo 480P y 768P.
+  { id: "minimax-h3-lite", name: "MiniMax H3 Lite", durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price480: 0.025, price720: 0.04, price1080: 0.04, resolutions: ["480p", "720p"], emoji: "🦎", tier: "¢" },
   { id: "wan2.6-i2v-flash-audio", name: "Wan 2.6 Flash (audio)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15], price720: 0.05, price1080: 0.075, resolutions: ["720p", "1080p"], emoji: "🌪", tier: "$$" },
   // wan2.5: escalones 5/10 con snap ↑ (patrón Sora); audio nativo automático.
   { id: "wan2.5-i2v-preview", name: "Wan 2.5 (10s)", durations: [5, 10], price480: 0.05, price720: 0.10, price1080: 0.15, emoji: "🌊", tier: "$$$" },
-  { id: "sora-2-batch", name: "Sora 2 Batch (≤24h)", durations: [4, 8, 12, 16, 20], price720: 0.05, price1080: 0.05, emoji: "📦", tier: "$" },
+  // SORA RETIRADO (24-nov-2026): OpenAI apago la API de video de Sora el 24-sep-2026.
+  // Se quitaron Sora 2, Sora 2 Batch y Sora Pro Batch del selector.
   { id: "veo-3.1-lite-generate-preview", name: "Veo Lite", durations: [5, 8], price720: 0.05, price1080: 0.08, emoji: "✨", tier: "$$" },
   // MiniMax H3 — API DIRECTA de MiniMax (no OpenRouter). Solo 2 resoluciones REALES:
   // "720p" del selector = 768P ($0.08/s) y "1080p" = 2K 2560×1440 ($0.13/s).
@@ -57,12 +66,23 @@ const MODELS: ModelInfo[] = [
   // — más barato que MiniMax directo ($0.08) y con 50% off hasta el 24-sep (el
   // estimado usa precio de lista; la promo llega como sorpresa buena en la factura).
   // Duración: entero 5-15 SIN escalones; audio nativo sí ([SFX]); NO acepta audio de entrada.
+  // MiniMax H3 Rapido (25-nov-2026): MiniMax-H3-Highspeed, 480P $0.04 · 768P $0.06.
+  { id: "minimax-h3-highspeed", name: "MiniMax H3 Rápido", durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price480: 0.04, price720: 0.06, price1080: 0.06, resolutions: ["480p", "720p"], emoji: "🐲", tier: "$" },
   { id: "pruna-video-2-pro", name: "P-Video 2 Pro", durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price480: 0.04, price720: 0.075, price1080: 0.075, resolutions: ["480p", "720p"], emoji: "💎", tier: "$$" },
+  // SD 2.0 Mini: audio incluido. SOLO 480p/720p. Escalones 4-15 con snap ↑.
+  // Doc oficial OpenRouter (30-ago-2026): Mini genera 4-15s. El caso "pedi 15, llego 10"
+  // quedo bajo vigilancia del worker (log REQUESTED vs DELIVERED) — si el proveedor
+  // vuelve a entregar corto, la evidencia sale en rojo en Render para reclamar.
+  // PRECIO 24-nov-2026 (pagina oficial de OpenRouter, ya sin descuento): $3.50/M tokens
+  // (antes $1.40) → 480p $0.0336 / 720p $0.0756. Subio 150%: ya NO es el mas barato,
+  // por eso bajo de lugar en la lista. Confirmar con el cobro real en Activity.
+  { id: "seedance-2.0-mini", name: "SD 2.0 Mini", durations: [4, 5, 8, 10, 12, 15], price480: 0.0336, price720: 0.0756, price1080: 0.0756, resolutions: ["480p", "720p"], emoji: "🪶", tier: "$$" },
   { id: "minimax-h3", name: "MiniMax H3 (2K)", durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price720: 0.08, price1080: 0.13, emoji: "🐉", tier: "$$" },
   { id: "veo-3.1-fast-generate-preview", name: "Veo Fast", durations: [5, 8], price720: 0.10, price1080: 0.12, emoji: "🚀", tier: "$$$" },
-  // Omni 1.1 (28-ago-2026): duración CONTINUA 3-10s por generación (modelo estable gemini-omni-1.1-flash; mismo precio).
-  { id: "omni-flash", name: "Omni 1.1 Flash", durations: [3, 4, 5, 6, 7, 8, 9, 10], price720: 0.10, price1080: 0.18, emoji: "🌟", tier: "$$$" },
-  { id: "sora-2", name: "Sora 2", durations: [4, 8, 12, 16, 20], price720: 0.10, price1080: 0.10, emoji: "🎦", tier: "$$$" },
+  // Omni 1.2 Flash (25-nov-2026, captura de Richi de AI Studio): gemini-omni-1.2-flash.
+  // Video $12/M tokens → 720p $0.07/s (antes $0.10). Hasta 15s por clip (antes 10).
+  // El backend SIEMPRE lo genera y lo cobra a 720p, por eso "1080p" lleva el mismo precio.
+  { id: "omni-flash", name: "Omni 1.2 Flash", durations: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price720: 0.07, price1080: 0.07, emoji: "🌟", tier: "$$$" },
   // Wan 3.0 — API DIRECTA DashScope/Alibaba (no OpenRouter). Audio nativo sí ([SFX]).
   // Duración: CUALQUIER entero 2-30 SIN escalones (se factura el segundo exacto).
   // Hasta 30s por clip — el único junto a Ken Burns que pasa de 20s. 1080p cuesta 2×.
@@ -70,14 +90,16 @@ const MODELS: ModelInfo[] = [
   // ⚠️ PRECIO PROMOCIONAL Wan 3.0 (verificado en consola DashScope 21-ago-2026): -30% sobre
   // lista ($0.10/$0.20). Si la promo termina sin aviso, los estimados quedarán CORTOS un 43%
   // hasta actualizar estas dos cifras — vigilar la primera factura de cada mes.
+  // (25-nov-2026) Captura de Richi de la pagina oficial QwenCloud: la promo 30% SIGUE
+  // vigente → $0.035 / $0.07 / $0.14 confirmados, sin cambio.
   { id: "wan3.0-video", name: "Wan 3.0 (30s)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30], price480: 0.035, price720: 0.07, price1080: 0.14, emoji: "🌀", tier: "$$" },
   // Seedance 480p HABILITADO 12-ago-2026 (854×480; vertical 480×854): la calidad de
   // movimiento de Seedance a ~44% del precio de 720p — YouTube Super Resolution
-  // re-escala <1080p del lado del espectador. CORRECCIÓN de precios SD 2.0 Fast:
-  // el FAQ oficial de OpenRouter dice $4.20/M tokens (no 0.8× de SD 2.0) →
-  // 480p $0.0404 / 720p $0.0907 / 1080p $0.204. Verificar 1ª factura en Activity.
-  { id: "seedance-2.0-fast", name: "SD 2.0 Fast", durations: [5, 8, 10, 12, 15], price480: 0.0404, price720: 0.0907, price1080: 0.204, emoji: "🔥", tier: "$$$" },
-  { id: "sora-2-pro-batch", name: "Sora Pro Batch (≤24h)", durations: [4, 8, 12, 16, 20], price720: 0.15, price1080: 0.15, emoji: "📦", tier: "$$" },
+  // re-escala <1080p del lado del espectador.
+  // PRECIO SD 2.0 Fast 24-nov-2026 (pagina oficial de OpenRouter, ya sin descuento):
+  // $5.60/M tokens (antes $4.20) → 480p $0.0538 / 720p $0.121 / 1080p $0.2722 (+33%).
+  // SD 2.0 sigue en $7.00/M (sin cambio). Confirmar con el cobro real en Activity.
+  { id: "seedance-2.0-fast", name: "SD 2.0 Fast", durations: [5, 8, 10, 12, 15], price480: 0.0538, price720: 0.121, price1080: 0.2722, emoji: "🔥", tier: "$$$" },
   { id: "seedance-2.0", name: "SD 2.0", durations: [5, 8, 10, 12, 15], price480: 0.067, price720: 0.151, price1080: 0.340, emoji: "💫", tier: "$$$$" },
 ]
 
@@ -230,6 +252,8 @@ function getCompatibleModels(duration: number): ModelInfo[] {
     // worker (patrón Sora) → compatible hasta 10s. Wan 2.6: enteros 2–15, su
     // lista de durations ya los incluye todos (cae al includes de abajo).
     if (m.id.startsWith("wan2.2-")) return duration <= 5
+    // Mischief 1: escalones 3/5 con snap ↑ en el worker → compatible con escenas ≤5s.
+    if (m.id === "mischief-1") return duration <= 5
     if (m.id === "wan2.5-i2v-preview") return duration <= 10
     // Wan 3.0: cualquier entero 2-30 SIN escalones (patrón H3). El worker redondea
     // al entero HACIA ARRIBA (clamp 2-30) y el export recorta a la ranura exacta.
@@ -239,11 +263,11 @@ function getCompatibleModels(duration: number): ModelInfo[] {
     // MiniMax H3: cualquier entero 4-15 SIN escalones. El worker redondea al entero
     // HACIA ARRIBA (clamp 4-15) y el export recorta a la ranura exacta — una escena
     // de 3s se genera de 4s y se recorta. Compatible con cualquier duración ≤ 15.
-    if (m.id === "minimax-h3") {
+    if (m.id.startsWith("minimax-h3")) {   // H3, H3 Lite y H3 Rapido: mismo trato
       return duration <= m.durations[m.durations.length - 1]
     }
     // P-Video-2-Pro: entero 5-15; escenas <5s se generan de 5s y el export recorta.
-    if (m.id === "pruna-video-2-pro") {
+    if (m.id.startsWith("pruna-video-2-pro")) {   // quality y cost: mismo trato
       return duration <= m.durations[m.durations.length - 1]
     }
     // Omni Flash (17-ago-2026): trato Sora. El worker redondea la ranura HACIA
@@ -253,10 +277,10 @@ function getCompatibleModels(duration: number): ModelInfo[] {
     // es prácticamente invisible → compatible con CUALQUIER duración.
     // Antes el panel bloqueaba Omni en escenas de 7/9/12s (reporte de Richi).
     if (m.id === "omni-flash") {
-      // REGLA DE LA CASA (30-ago-2026): Omni 1.1 genera max 10s por clip. Ranuras
-      // mayores NO son compatibles: el modelo debe producir los segundos COMPLETOS
-      // de la escena o no se ofrece. Nada de rellenos silenciosos.
-      return duration <= 10
+      // REGLA DE LA CASA (30-ago-2026): ranuras mayores que el maximo del modelo NO son
+      // compatibles: debe producir los segundos COMPLETOS de la escena o no se ofrece.
+      // Omni 1.2 (25-nov-2026): maximo 15s por clip (1.1 llegaba a 10).
+      return duration <= 15
     }
     return m.durations.includes(duration)
   })
@@ -327,17 +351,18 @@ function getPrice(modelId: string, duration: number, resolution: Resolution): nu
   // real salía más alto (una escena de 6s se factura como 8s).
   let billed = duration
   if (modelId.startsWith("sora") || modelId.startsWith("seedance-2.0")
-      || modelId.startsWith("wan2.2-") || modelId === "wan2.5-i2v-preview") {
+      || modelId.startsWith("wan2.2-") || modelId === "wan2.5-i2v-preview"
+      || modelId === "mischief-1") {
     billed = m.durations.find((d) => duration <= d) ?? m.durations[m.durations.length - 1]
   }
   // MiniMax H3 factura el SEGUNDO ENTERO exacto (sin escalones): redondeo hacia
   // arriba con límites 4-15 — igual que clamp_seconds() del worker.
-  if (modelId === "minimax-h3") {
+  if (modelId.startsWith("minimax-h3")) {
     billed = Math.max(4, Math.min(15, Math.ceil(duration - 0.01)))
   }
   // P-Video-2-Pro factura el SEGUNDO ENTERO exacto con límites 5-15 — igual que
   // el clamp del worker (una escena de 3s se genera de 5s y el export recorta).
-  if (modelId === "pruna-video-2-pro") {
+  if (modelId.startsWith("pruna-video-2-pro")) {
     billed = Math.max(5, Math.min(15, Math.ceil(duration - 0.01)))
   }
   // Wan 3.0 factura el SEGUNDO ENTERO exacto (sin escalones): redondeo hacia
@@ -349,9 +374,9 @@ function getPrice(modelId: string, duration: number, resolution: Resolution): nu
   // una ranura de 12s genera un clip de 8s (el resto lo rellena congelado el export),
   // así que cuesta 8×$0.10, no 12×. Igual que snap_seconds() de omni_video.py.
   if (modelId === "omni-flash") {
-    // Omni 1.1: se factura el SEGUNDO ENTERO exacto con límites 3-10 (una escena de 7s
-    // cuesta 7×; ranuras >10s generan 10s y el export rellena congelado el resto).
-    billed = Math.max(3, Math.min(10, Math.ceil(duration - 0.01)))
+    // Omni 1.2: se factura el SEGUNDO ENTERO exacto con límites 3-15 (una escena de 7s
+    // cuesta 7×).
+    billed = Math.max(3, Math.min(15, Math.ceil(duration - 0.01)))
   }
   return perSec * billed
 }
@@ -964,6 +989,10 @@ export const ProductionPanel = memo(function ProductionPanel({
 
         // Determine model: if saved as ken-burns but no KB video exists, switch to PrunaAI Draft
         let model = saved?.model || (s.video_url ? (s.video_model || defaultModel) : defaultModel)
+        // Modelo guardado que ya NO existe en el selector (p.ej. Sora, retirado el
+        // 24-nov-2026): la escena vuelve al modelo por defecto en vez de quedar con un
+        // desplegable en blanco que el backend rechazaria al generar.
+        if (!MODEL_MAP[model]) model = defaultModel
         if (model === "ken-burns" && !s.video_url && !(saved?.status === "done" && saved?.videoUrl)) {
           model = defaultModel // pruna-video-draft
         }
