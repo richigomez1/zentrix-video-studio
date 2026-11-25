@@ -35,13 +35,10 @@ const MODELS: ModelInfo[] = [
   { id: "mischief-1", name: "Mischief 1 (≤5s · sin audio · solo 16:9)", durations: [3, 5], price480: 0.005, price720: 0.01, price1080: 0.01, resolutions: ["480p", "720p"], emoji: "🧪", tier: "¢" },
   // P-Video-2 (18-sep-2026): sustituye a PrunaAI v1. 1-20s continuos, audio incluido, ultimo frame opcional.
   { id: "pruna-video-2-draft", name: "P-Video-2 Draft", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.015, price1080: 0.03, emoji: "⚡", tier: "¢" },
-  // ── Wan 2.x — API DIRECTA DashScope (12-ago-2026). Precios QwenCloud verificados;
-  // el 1er cobro real por DashScope puede diferir: verificar factura. Todos i2v.
-  // wan2.2: clips FIJOS de 5s (escenas ≤5s; el export recorta) — el validador barato.
-  { id: "wan2.2-i2v-flash", name: "Wan 2.2 Flash (5s)", durations: [5], price480: 0.015, price720: 0.036, price1080: 0.036, resolutions: ["480p", "720p"], emoji: "🌬", tier: "¢" },
-  { id: "wan2.2-i2v-plus", name: "Wan 2.2 Plus (5s)", durations: [5], price480: 0.02, price720: 0.10, price1080: 0.10, resolutions: ["480p", "1080p"], emoji: "🍃", tier: "$" },
-  // wan2.6-flash SIN audio: 1080p a $0.0375/s — el competidor directo de Pruna Normal.
-  { id: "wan2.6-i2v-flash", name: "Wan 2.6 Flash (sin audio)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15], price720: 0.025, price1080: 0.0375, resolutions: ["720p", "1080p"], emoji: "🌪", tier: "$" },
+  // RETIRADOS (25-nov-2026):
+  //  · Veo Lite y Veo Fast: Google apago los Veo 3.1 Preview el 22-oct-2026.
+  //  · Wan 2.2 Flash, 2.2 Plus, 2.5 y 2.6 (con y sin audio): decision de Richi — queda
+  //    solo Wan 3.0, que con su descuento directo los supera en precio y capacidades.
   { id: "pruna-video-2", name: "P-Video-2", durations: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], price720: 0.025, price1080: 0.05, emoji: "🎬", tier: "$" },
   // (25-nov-2026) Tabla oficial de PrunaAI (capturas de Richi): P-Video 2 Pro tiene 3 modos.
   // "Pro Economico" = modo cost: el MISMO modelo y resolucion a un tercio del precio
@@ -51,12 +48,9 @@ const MODELS: ModelInfo[] = [
   // (25-nov-2026) Hermanos baratos de MiniMax H3 (pagina oficial de precios, captura de
   // Richi): misma API directa, 4-15s, audio nativo. Sin 2K: solo 480P y 768P.
   { id: "minimax-h3-lite", name: "MiniMax H3 Lite", durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price480: 0.025, price720: 0.04, price1080: 0.04, resolutions: ["480p", "720p"], emoji: "🦎", tier: "¢" },
-  { id: "wan2.6-i2v-flash-audio", name: "Wan 2.6 Flash (audio)", durations: [2,3,4,5,6,7,8,9,10,11,12,13,14,15], price720: 0.05, price1080: 0.075, resolutions: ["720p", "1080p"], emoji: "🌪", tier: "$$" },
   // wan2.5: escalones 5/10 con snap ↑ (patrón Sora); audio nativo automático.
-  { id: "wan2.5-i2v-preview", name: "Wan 2.5 (10s)", durations: [5, 10], price480: 0.05, price720: 0.10, price1080: 0.15, emoji: "🌊", tier: "$$$" },
   // SORA RETIRADO (24-nov-2026): OpenAI apago la API de video de Sora el 24-sep-2026.
   // Se quitaron Sora 2, Sora 2 Batch y Sora Pro Batch del selector.
-  { id: "veo-3.1-lite-generate-preview", name: "Veo Lite", durations: [5, 8], price720: 0.05, price1080: 0.08, emoji: "✨", tier: "$$" },
   // MiniMax H3 — API DIRECTA de MiniMax (no OpenRouter). Solo 2 resoluciones REALES:
   // "720p" del selector = 768P ($0.08/s) y "1080p" = 2K 2560×1440 ($0.13/s).
   // Duración: CUALQUIER entero 4-15, SIN escalones (6s se genera y factura de 6s).
@@ -78,7 +72,6 @@ const MODELS: ModelInfo[] = [
   // por eso bajo de lugar en la lista. Confirmar con el cobro real en Activity.
   { id: "seedance-2.0-mini", name: "SD 2.0 Mini", durations: [4, 5, 8, 10, 12, 15], price480: 0.0336, price720: 0.0756, price1080: 0.0756, resolutions: ["480p", "720p"], emoji: "🪶", tier: "$$" },
   { id: "minimax-h3", name: "MiniMax H3 (2K)", durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], price720: 0.08, price1080: 0.13, emoji: "🐉", tier: "$$" },
-  { id: "veo-3.1-fast-generate-preview", name: "Veo Fast", durations: [5, 8], price720: 0.10, price1080: 0.12, emoji: "🚀", tier: "$$$" },
   // Omni 1.2 Flash (25-nov-2026, captura de Richi de AI Studio): gemini-omni-1.2-flash.
   // Video $12/M tokens → 720p $0.07/s (antes $0.10). Hasta 15s por clip (antes 10).
   // El backend SIEMPRE lo genera y lo cobra a 720p, por eso "1080p" lleva el mismo precio.
@@ -100,7 +93,15 @@ const MODELS: ModelInfo[] = [
   // $5.60/M tokens (antes $4.20) → 480p $0.0538 / 720p $0.121 / 1080p $0.2722 (+33%).
   // SD 2.0 sigue en $7.00/M (sin cambio). Confirmar con el cobro real en Activity.
   { id: "seedance-2.0-fast", name: "SD 2.0 Fast", durations: [5, 8, 10, 12, 15], price480: 0.0538, price720: 0.121, price1080: 0.2722, emoji: "🔥", tier: "$$$" },
+  // SD 2.5 Flash (25-nov-2026, pedido por Richi) via OpenRouter, lanzado el 17-nov-2026.
+  // $7.00/M tokens (igual que SD 2.0) → 480p $0.0673 / 720p $0.1512. SOLO 480p/720p.
+  // Cualquier entero de 4 a 30s (el doble que SD 2.0). Audio incluido.
+  { id: "seedance-2.5-flash", name: "SD 2.5 Flash (30s)", durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30], price480: 0.0673, price720: 0.1512, price1080: 0.1512, resolutions: ["480p", "720p"], emoji: "⚡", tier: "$$$$" },
   { id: "seedance-2.0", name: "SD 2.0", durations: [5, 8, 10, 12, 15], price480: 0.067, price720: 0.151, price1080: 0.340, emoji: "💫", tier: "$$$$" },
+  // FLUX 3 Video (25-nov-2026, pedido por Richi) via OpenRouter — Black Forest Labs.
+  // Ficha oficial (captura de Richi): $0.17/s a 720p, clips de 5 a 20s, audio propio, 9:16 si.
+  // La ficha NO publica el precio de 1080p en adelante: solo se ofrece 720p.
+  { id: "flux-3-video", name: "FLUX 3 Video (20s)", durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], price720: 0.17, price1080: 0.17, resolutions: ["720p"], emoji: "🌊", tier: "$$$$" },
 ]
 
 
@@ -156,7 +157,7 @@ const TIER_CONFIG: Record<TierName, { label: string; emoji: string; color: strin
     label: "Equilibrado",
     emoji: "🟡",
     color: "bg-amber-600 hover:bg-amber-500",
-    description: "PrunaAI Normal — $0.02/seg",
+    description: "P-Video-2 — $0.025/seg",
     mapping: {
       3: "pruna-video-2",
       4: "pruna-video-2",
@@ -177,14 +178,14 @@ const TIER_CONFIG: Record<TierName, { label: string; emoji: string; color: strin
     label: "Balanceado",
     emoji: "🟠",
     color: "bg-orange-600 hover:bg-orange-500",
-    description: "PrunaAI + Veo Lite — mejor calidad",
+    description: "P-Video-2 + MiniMax H3 Lite — mejor calidad",
     mapping: {
       3: "pruna-video-2",
       4: "pruna-video-2",
-      5: "veo-3.1-lite-generate-preview",
+      5: "minimax-h3-lite",
       6: "pruna-video-2",
       7: "pruna-video-2",
-      8: "veo-3.1-lite-generate-preview",
+      8: "minimax-h3-lite",
       9: "pruna-video-2",
       10: "pruna-video-2",
       11: "pruna-video-2",
@@ -198,21 +199,21 @@ const TIER_CONFIG: Record<TierName, { label: string; emoji: string; color: strin
     label: "Premium",
     emoji: "🔴",
     color: "bg-red-600 hover:bg-red-500",
-    description: "Veo Fast — máxima calidad",
+    description: "MiniMax H3 — máxima calidad",
     mapping: {
-      3: "veo-3.1-fast-generate-preview",
-      4: "veo-3.1-fast-generate-preview",
-      5: "veo-3.1-fast-generate-preview",
-      6: "veo-3.1-fast-generate-preview",
-      7: "veo-3.1-fast-generate-preview",
-      8: "veo-3.1-fast-generate-preview",
-      9: "veo-3.1-fast-generate-preview",
-      10: "veo-3.1-fast-generate-preview",
-      11: "veo-3.1-fast-generate-preview",
-      12: "veo-3.1-fast-generate-preview",
-      13: "veo-3.1-fast-generate-preview",
-      14: "veo-3.1-fast-generate-preview",
-      15: "veo-3.1-fast-generate-preview",
+      3: "minimax-h3",
+      4: "minimax-h3",
+      5: "minimax-h3",
+      6: "minimax-h3",
+      7: "minimax-h3",
+      8: "minimax-h3",
+      9: "minimax-h3",
+      10: "minimax-h3",
+      11: "minimax-h3",
+      12: "minimax-h3",
+      13: "minimax-h3",
+      14: "minimax-h3",
+      15: "minimax-h3",
     },
   },
 }
@@ -244,7 +245,7 @@ function getCompatibleModels(duration: number): ModelInfo[] {
     // duración HACIA ARRIBA a su escalón (5/8/10/12/15) y el export recorta a la
     // ranura exacta. Una escena de 6s se genera de 8s y se recorta — nunca queda
     // bloqueada. (SD 1.0 va por Replicate, SIN snap en el worker: mantiene lista exacta.)
-    if (m.id.startsWith("seedance-2.0")) {
+    if (m.id.startsWith("seedance-2.0") || m.id === "seedance-2.5-flash" || m.id === "flux-3-video") {   // 2.5 Flash: hasta 30s · FLUX 3: hasta 20s
       return duration <= m.durations[m.durations.length - 1]
     }
     // Wan 2.2: clip FIJO de 5s (la API no acepta duration) → compatible con
@@ -352,7 +353,7 @@ function getPrice(modelId: string, duration: number, resolution: Resolution): nu
   let billed = duration
   if (modelId.startsWith("sora") || modelId.startsWith("seedance-2.0")
       || modelId.startsWith("wan2.2-") || modelId === "wan2.5-i2v-preview"
-      || modelId === "mischief-1") {
+      || modelId === "mischief-1" || modelId === "seedance-2.5-flash" || modelId === "flux-3-video") {
     billed = m.durations.find((d) => duration <= d) ?? m.durations[m.durations.length - 1]
   }
   // MiniMax H3 factura el SEGUNDO ENTERO exacto (sin escalones): redondeo hacia
